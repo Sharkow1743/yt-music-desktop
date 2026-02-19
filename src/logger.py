@@ -4,10 +4,10 @@ from rich.logging import RichHandler
 from rich.console import Console
 from rich.theme import Theme
 
-# 1. Initialize verboselogs to register custom levels (SPAM, VERBOSE, etc.)
+# 1. Force all new loggers to be VerboseLoggers
+logging.setLoggerClass(verboselogs.VerboseLogger)
 verboselogs.install()
 
-# 2. Configure the Rich Console and Theme
 custom_theme = Theme({
     "logging.level.spam": "italic dim grey37",
     "logging.level.verbose": "italic grey50",
@@ -22,14 +22,14 @@ custom_theme = Theme({
 
 FORMAT = "%(name)-12s │ %(message)s"
 
-# 3. Setup basic configuration
+# 2. Configure Root Logger
 logging.basicConfig(
-    level="INFO",  # Default level for all other loggers
+    level="SPAM", # Capture everything at root
     format=FORMAT,
     datefmt="[%X]",
     handlers=[
         RichHandler(
-            level="SPAM",  # Allow the handler to process SPAM and above
+            level="SPAM", 
             console=Console(theme=custom_theme),
             rich_tracebacks=True, 
             markup=False, 
@@ -38,9 +38,12 @@ logging.basicConfig(
     ]
 )
 
-# 4. Enable low-level logging specifically for the 'ytmd' hierarchy
-logging.getLogger("ytmd").setLevel(verboselogs.SPAM)
+logging.getLogger().setLevel('INFO')
 
-def get_logger(name: str):
-    # Use dots for hierarchy: 'ytmd.submodule'
-    return verboselogs.VerboseLogger(f"ytmd.{name.replace('/', '.')}")
+ytmd_logger = logging.getLogger("ytmd")
+ytmd_logger.setLevel("SPAM")
+ytmd_logger.propagate = True 
+
+def get_logger(name: str) -> verboselogs.VerboseLogger:
+    # This now returns a VerboseLogger because of setLoggerClass
+    return logging.getLogger(f"ytmd.{name}")

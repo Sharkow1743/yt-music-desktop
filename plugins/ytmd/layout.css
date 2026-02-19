@@ -7,22 +7,27 @@
 }
 
 #main-panel {
-	padding: 0 0 !important;
+	padding: 0 !important;
+    margin: 0 !important;
+    min-width: 30%;
+    flex-wrap: 1;
+    max-width: none;
 }
 
 #side-panel {
 	margin: 0 !important;
-	width: 100% !important;
+    padding: 0 !important;
 	flex-grow: 3;
-	flex-shrink: 0;
+    max-width: none;
 }
 
 .ytmusic-player-page {
 	--ytmusic-player-page-vertical-padding: 0 !important;
-	--ytmusic-player-page-horizontal-padding: 0 !important;
-	--ytmusic-player-page-content-gap: 5% !important;
-	--ytmusic-player-page-side-panel-width: 80% !important;
-	justify-content: space-evenly;
+	--ytmusic-player-page-horizontal-padding: 3% !important;
+	--ytmusic-player-page-content-gap: 1% !important;
+	justify-content: space-between !important;
+    padding-left: 5%;
+    padding-right: 5%;
 }
 
 ytmusic-queue-header-renderer {
@@ -34,7 +39,7 @@ ytmusic-queue-header-renderer {
 }
 
 .middle-controls {
-	margin-left: 40%;
+	margin-left: 10%;
 }
 
 .text-lyrics {
@@ -44,24 +49,16 @@ ytmusic-queue-header-renderer {
 #thumbnail>#img,
 #thumbnail,
 #song-image,
-#player {
-	border-radius: 25px;
-}
-
-#sliderKnob > div.slider-knob-inner {
-	display: none;
-}
-
+#player,
+.ytmusic-player,
 .html5-video-container, 
 .html5-video-player, 
 #song-video, 
 #song-video > div,
 .html5-main-video {
-	background-color: black !important;
-	border-radius: 25px !important;
-	overflow: hidden !important;
+	border-radius: 5px !important;
 }
 
-.ytmusic-player {
-	border-radius: 25px;
+#sliderKnob > div.slider-knob-inner {
+	display: none;
 }
