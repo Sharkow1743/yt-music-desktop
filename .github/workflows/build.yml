@@ -1,0 +1,80 @@
+name: Build and Release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: yt-music-win.zip
+            executable: yt_music.exe
+          - os: macos-latest
+            asset_name: yt-music-mac.zip
+            executable: yt_music.app
+          - os: ubuntu-20.04
+            asset_name: yt-music-linux.zip
+            executable: yt_music.bin
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install OS Specific Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev python3-dev build-essential
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka --standalone --onefile \
+          --windows-disable-console \
+          --macosx-bundle \
+          --plugin-enable=tk-inter \
+          --output-filename=yt_music \
+          main.py
+
+      - name: Prepare Release Folder (Windows/Linux)
+        if: runner.os != 'macOS'
+        run: |
+          mkdir release_dir
+          mkdir release_dir/plugins
+          cp yt_music* release_dir/
+          # Copy a dummy file to ensure plugins folder exists in zip
+          echo "Place plugins here" > release_dir/plugins/put_scripts_here.txt
+
+      - name: Prepare Release Folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir release_dir
+          mkdir release_dir/plugins
+          cp -r yt_music.app release_dir/
+          echo "Place plugins here" > release_dir/plugins/put_scripts_here.txt
+
+      - name: Zip Release
+        shell: bash
+        run: |
+          cd release_dir
+          zip -r ../${{ matrix.asset_name }} .
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ matrix.asset_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
