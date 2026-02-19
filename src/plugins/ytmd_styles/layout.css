@@ -1,0 +1,67 @@
+.ytmusic-app-layout {
+	--ytmusic-nav-bar-height: 65px;
+}
+
+.ytmusic-two-column-browse-results-renderer {
+	position: relative !important;
+}
+
+#main-panel {
+	padding: 0 0 !important;
+}
+
+#side-panel {
+	margin: 0 !important;
+	width: 100% !important;
+	flex-grow: 3;
+	flex-shrink: 0;
+}
+
+.ytmusic-player-page {
+	--ytmusic-player-page-vertical-padding: 0 !important;
+	--ytmusic-player-page-horizontal-padding: 0 !important;
+	--ytmusic-player-page-content-gap: 5% !important;
+	--ytmusic-player-page-side-panel-width: 80% !important;
+	justify-content: space-evenly;
+}
+
+ytmusic-queue-header-renderer {
+	display: none !important;
+}
+
+#main-panel.ytmusic-player-page {
+	flex: 0.5 !important;
+}
+
+.middle-controls {
+	margin-left: 40%;
+}
+
+.text-lyrics {
+	padding: 2% !important;
+}
+
+#thumbnail>#img,
+#thumbnail,
+#song-image,
+#player {
+	border-radius: 25px;
+}
+
+#sliderKnob > div.slider-knob-inner {
+	display: none;
+}
+
+.html5-video-container, 
+.html5-video-player, 
+#song-video, 
+#song-video > div,
+.html5-main-video {
+	background-color: black !important;
+	border-radius: 25px !important;
+	overflow: hidden !important;
+}
+
+.ytmusic-player {
+	border-radius: 25px;
+}
