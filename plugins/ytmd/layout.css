@@ -9,25 +9,36 @@
 #main-panel {
 	padding: 0 !important;
     margin: 0 !important;
-    min-width: 30%;
-    flex-wrap: 1;
-    max-width: none;
+    max-height: 90% !important;
+	max-width: 35%;
+    flex-grow: 2;
+	align-self: center;
+	aspect-ratio: 1 / 1;
+}
+
+ytmusic-player {
+	max-height: 90% !important;
 }
 
 #side-panel {
 	margin: 0 !important;
     padding: 0 !important;
 	flex-grow: 3;
-    max-width: none;
+	max-width: 65% !important;
 }
 
 .ytmusic-player-page {
 	--ytmusic-player-page-vertical-padding: 0 !important;
 	--ytmusic-player-page-horizontal-padding: 3% !important;
 	--ytmusic-player-page-content-gap: 1% !important;
+	--ytmusic-player-page-side-panel-width: unset !important;
 	justify-content: space-between !important;
     padding-left: 5%;
     padding-right: 5%;
+}
+
+.side-panel.ytmusic-player-page {
+	width: unset !important;
 }
 
 ytmusic-queue-header-renderer {
@@ -36,14 +47,6 @@ ytmusic-queue-header-renderer {
 
 #main-panel.ytmusic-player-page {
 	flex: 0.5 !important;
-}
-
-.middle-controls {
-	margin-left: 10%;
-}
-
-.text-lyrics {
-	padding: 2% !important;
 }
 
 #thumbnail>#img,
@@ -62,3 +65,40 @@ ytmusic-queue-header-renderer {
 #sliderKnob > div.slider-knob-inner {
 	display: none;
 }
+
+ytmusic-player-page {
+    position: relative;
+    background: #000 !important;
+    overflow: visible !important;
+    z-index: 0;
+}
+
+/* Background Container */
+#live-mesh-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    filter: blur(80px); /* Slightly lower blur makes individual shapes more visible */
+    background: #000; /* Dark base */
+	opacity: 0.5;
+}
+
+.mesh-blob {
+    position: absolute;
+    border-radius: 50%;
+    will-change: transform, left, top, opacity;
+    /* This creates the 'live' blending effect */
+    mix-blend-mode: screen; 
+    transition: opacity 10s ease-in-out;
+}
+
+/* Color distribution */
+.mesh-blob:nth-child(3n+1) { background: var(--accent); }
+.mesh-blob:nth-child(3n+2) { background: var(--accent); }
+.mesh-blob:nth-child(3n+3) { background: var(--accent-light); }
+.mesh-blob:nth-child(3n+4) { background: #ffffff; opacity: 0.1 !important; }
+.mesh-blob:nth-child(3n+5) { background: #000000; opacity: 0.5 !important; }

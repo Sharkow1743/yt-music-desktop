@@ -1,4 +1,4 @@
 {
-    "name": "ytmd_styles",
-    "files": ["color.css", "layout.css"]
+    "name": "ytmd",
+    "files": ["purify.js", "color.css", "layout.css", "live_mesh.js"]
 }

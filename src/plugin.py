@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import typing
 import webview
 from pydantic import BaseModel, TypeAdapter, model_validator
+import subprocess
 
 from logger import get_logger
 
@@ -47,6 +48,7 @@ class ManifestModel(BaseModel):
     files: list[str] = []
     python_script: Optional[str] = None
     config: list[ConfigPropertyModel] = []
+    dependencies: list[str] = []
 
 # --- Core Logic ---
 
@@ -99,10 +101,38 @@ class Plugin:
             self.log.error(f"Failed to parse manifest: {e}")
             return
         
+        # --- NEW: Install Dependencies ---
+        if self.manifest.dependencies:
+            self._install_dependencies()
+        # ---------------------------------
+
         if self.manifest.python_script:
             self._load_python_module()
         else:
             self.log.verbose("No python_script defined in manifest.")
+
+    def _install_dependencies(self):
+        """Installs dependencies listed in manifest using pip."""
+        # If running as a compiled EXE, we usually can't install new packages easily
+        if getattr(sys, 'frozen', False):
+            self.log.warning(f"App is frozen. Skipping auto-install of: {self.manifest.dependencies}")
+            return
+
+        packages = self.manifest.dependencies
+        self.log.info(f"Verifying dependencies: {', '.join(packages)}...")
+
+        try:
+            # sys.executable ensures we use the same python interpreter running this script
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install"] + packages,
+                stdout=subprocess.DEVNULL, # Suppress standard output to keep console clean
+                stderr=subprocess.PIPE     # Capture errors if it fails
+            )
+            self.log.success("Dependencies verified.")
+        except subprocess.CalledProcessError as e:
+            # Decode stderr to show the user what went wrong
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            self.log.error(f"Failed to install dependencies: {error_msg}")
 
     def _load_python_module(self):
         script_path = os.path.join(self.folder, self.manifest.python_script)
@@ -120,12 +150,12 @@ class Plugin:
             # This executes the module code
             spec.loader.exec_module(module)
 
-            if hasattr(module, 'PluginAPI'):
-                self.log.verbose("Found 'PluginAPI' class. Instantiating with config...")
+            if hasattr(module, 'Main'):
+                self.log.verbose("Found 'Main' class. Instantiating with config...")
                 config_dict = {p.name: p.value for p in self.manifest.config}
-                self.python_instance = module.PluginAPI(config_dict)
+                self.python_instance = module.Main(config_dict, get_logger(f'plugin.{self.manifest.name.replace(' ', '_')}'))
             else:
-                self.log.verbose("No 'PluginAPI' class found. Using raw module export.")
+                self.log.verbose("No 'Main' class found. Using raw module export.")
                 self.python_instance = module
             
             self.log.success("Python backend initialized successfully.")

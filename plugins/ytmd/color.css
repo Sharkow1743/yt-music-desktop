@@ -1,38 +1,39 @@
 :root {
     /* EDIT COLORS HERE */
-    --my-accent: #ff8c00;           /* Main Orange Accent */
-    --my-accent-light: #ffc864;     /* Lighter Orange (for lyrics) */
-    --my-bg-main: #333333;          /* Surface & Backgrounds */
-    --my-text-inverse: #2d2d2d;     /* Dark text on light backgrounds */
-    --my-error: #ff4e4e;            /* Invalid/Error color */
+    --accent: #ff8c00;           /* Main Orange Accent */
+    --accent-light: #ffc864;     /* Lighter Orange (for lyrics) */
+    --bg: #502c00;               /* Surface & Backgrounds */
+    --text-inverse: #2d2d2d;     /* Dark text on light backgrounds */
+    --error: #ff4e4e;            /* Invalid/Error color */
     
     /* Transparency Levels */
-    --my-accent-alpha-10: rgba(255, 140, 0, 0.1);
-    --my-accent-alpha-15: rgba(255, 140, 0, 0.15);
-    --my-accent-alpha-30: rgba(255, 140, 0, 0.3);
+    --accent-alpha-10: rgba(255, 140, 0, 0.1);
+    --accent-alpha-15: rgba(255, 140, 0, 0.15);
+    --accent-alpha-30: rgba(255, 140, 0, 0.3);
+    --accent-alpha-50: rgba(255, 140, 0, 0.5);
 }
 
 * {
     /* Main Background & Surface Colors */
-    --yt-spec-raised-background: var(--my-bg-main) !important;
-    --paper-dialog-background-color: var(--my-bg-main) !important;
-    --paper-listbox-background-color: var(--my-bg-main) !important;
-    --paper-menu-background-color: var(--my-bg-main) !important;
+    --yt-spec-raised-background: var(--bg) !important;
+    --paper-dialog-background-color: var(--bg) !important;
+    --paper-listbox-background-color: var(--bg) !important;
+    --paper-menu-background-color: var(--bg) !important;
 
     /* Text & Action Colors */
-    --yt-spec-call-to-action: var(--my-accent) !important;
-    --yt-spec-text-primary-inverse: var(--my-text-inverse) !important;
+    --yt-spec-call-to-action: var(--accent) !important;
+    --yt-spec-text-primary-inverse: var(--text-inverse) !important;
     --yt-primary-text-color: var(--ytmusic-text-primary) !important;
     --yt-spec-text-primary: var(--ytmusic-text-primary) !important;
     --yt-spec-text-secondary: var(--ytmusic-text-secondary) !important;
     --yt-endpoint-color: unset !important;
-    --yt-endpoint-hover-color: var(--my-accent) !important;
-    --yt-swatch-logo-override: var(--my-accent) !important;
+    --yt-endpoint-hover-color: var(--accent) !important;
+    --yt-swatch-logo-override: var(--accent) !important;
 
     /* Selection & Toggles */
-    --paper-toggle-button-checked-bar-color: var(--my-accent-alpha-30) !important;
-    --paper-toggle-button-checked-button-color: var(--my-accent) !important;
-    --paper-toggle-button-checked-ink-color: var(--my-accent) !important;
+    --paper-toggle-button-checked-bar-color: var(--accent-alpha-30) !important;
+    --paper-toggle-button-checked-button-color: var(--accent) !important;
+    --paper-toggle-button-checked-ink-color: var(--accent) !important;
     
     --paper-toggle-button-unchecked-bar-color: var(--yt-spec-text-disabled) !important;
     --paper-toggle-button-unchecked-button-color: var(--yt-spec-text-secondary) !important;
@@ -40,66 +41,51 @@
 
     /* Inputs & Form Elements */
     --paper-listbox-color: var(--yt-spec-text-primary) !important;
-    --paper-input-container-focus-color: var(--my-accent) !important;
+    --paper-input-container-focus-color: var(--accent) !important;
     --paper-input-container-input-color: var(--yt-spec-text-primary) !important;
-    --paper-input-container-invalid-color: var(--my-error) !important;
+    --paper-input-container-invalid-color: var(--error) !important;
 
     /* Checkboxes & Radios */
     --paper-checkbox-unchecked-color: var(--yt-spec-text-primary) !important;
-    --paper-checkbox-checked-color: var(--my-accent) !important;
-    --paper-checkbox-checkmark-color: var(--my-text-inverse) !important;
+    --paper-checkbox-checked-color: var(--accent) !important;
+    --paper-checkbox-checkmark-color: var(--text-inverse) !important;
     --paper-checkbox-label-color: var(--yt-spec-text-primary) !important;
 
     --paper-radio-button-unchecked-color: var(--yt-spec-text-primary) !important;
-    --paper-radio-button-checked-color: var(--my-accent) !important;
+    --paper-radio-button-checked-color: var(--accent) !important;
     --paper-radio-button-label-color: var(--yt-spec-text-primary) !important;
 
     /* Spinners (Loading indicators) */
-    --paper-spinner-layer-1-color: var(--my-accent) !important;
-    --paper-spinner-layer-2-color: var(--my-accent) !important;
-    --paper-spinner-layer-3-color: var(--my-accent) !important;
-    --paper-spinner-layer-4-color: var(--my-accent) !important;
-    --paper-spinner-color: var(--my-accent) !important;
+    --paper-spinner-layer-1-color: var(--accent) !important;
+    --paper-spinner-layer-2-color: var(--accent) !important;
+    --paper-spinner-layer-3-color: var(--accent) !important;
+    --paper-spinner-layer-4-color: var(--accent) !important;
+    --paper-spinner-color: var(--accent) !important;
 
     /* Misc */
     --yt-icon-width: 40px !important;
     --yt-icon-height: 40px !important;
 }
 
-/* Lyrics & Active Line Styling */
-.synced-line.current::before {
-    content: '';
-    position: absolute;
-    left: 10px;
-    width: 98%;
-    height: 100%;
-    border-radius: 20px;
-    background: var(--my-accent-alpha-15); 
-    backdrop-filter: blur(10px);
-    filter: blur(5px);
-    z-index: -1;
-}
-
-.synced-line.current {
-    color: var(--my-accent-light);
-    text-shadow: 0 0 10px var(--my-accent-alpha-30);
-    padding-left: 15px;
-    transition: padding-left 0.1s;
-}
-
 /* Queue Highlight */
 ytmusic-player-queue-item[play-button-state=loading], 
 ytmusic-player-queue-item[play-button-state=playing], 
 ytmusic-player-queue-item[play-button-state=paused] {
-    background-color: var(--my-accent-alpha-10) !important;
+    background-color: var(--accent-alpha-10) !important;
     border-radius: 12px;
 }
 
 /* Progress Bars */
 #progress-bar.ytmusic-player-bar {
-    --paper-slider-active-color: var(--my-accent) !important;
+    --paper-slider-active-color: var(--accent) !important;
 }
 
 #progress {
-    background: var(--my-accent) !important;
+    background: var(--accent) !important;
+}
+
+#mini-guide-background,
+#nav-bar-background {
+    background-color: transparent !important;
+    border-right: none !important;
 }
