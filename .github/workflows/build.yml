@@ -14,9 +14,6 @@ jobs:
           - os: windows-latest
             asset_name: yt-music-win.zip
             executable: yt_music.exe
-          - os: macos-latest
-            asset_name: yt-music-mac.zip
-            executable: yt_music.app
           - os: ubuntu-20.04
             asset_name: yt-music-linux.zip
             executable: yt_music.bin
