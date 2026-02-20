@@ -46,7 +46,7 @@ jobs:
           --windows-disable-console \
           --plugin-enable=tk-inter \
           --output-filename=yt_music \
-          main.py
+          src/main.py
 
       - name: Prepare Release Folder (Windows/Linux)
         run: |
