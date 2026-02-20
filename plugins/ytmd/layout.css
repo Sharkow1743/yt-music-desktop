@@ -59,7 +59,7 @@ ytmusic-queue-header-renderer {
 #song-video, 
 #song-video > div,
 .html5-main-video {
-	border-radius: 5px !important;
+	border-radius: 10px !important;
 }
 
 #sliderKnob > div.slider-knob-inner {
@@ -99,6 +99,6 @@ ytmusic-player-page {
 /* Color distribution */
 .mesh-blob:nth-child(3n+1) { background: var(--accent); }
 .mesh-blob:nth-child(3n+2) { background: var(--accent); }
-.mesh-blob:nth-child(3n+3) { background: var(--accent-light); }
+.mesh-blob:nth-child(3n+3) { background: var(--accent); }
 .mesh-blob:nth-child(3n+4) { background: #ffffff; opacity: 0.1 !important; }
 .mesh-blob:nth-child(3n+5) { background: #000000; opacity: 0.5 !important; }
