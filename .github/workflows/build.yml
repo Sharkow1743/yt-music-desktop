@@ -29,7 +29,9 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install nuitka
 
       - name: Install OS Specific Dependencies (Linux)
         if: runner.os == 'Linux'
@@ -48,20 +50,11 @@ jobs:
           main.py
 
       - name: Prepare Release Folder (Windows/Linux)
-        if: runner.os != 'macOS'
         run: |
           mkdir release_dir
           mkdir release_dir/plugins
           cp yt_music* release_dir/
           # Copy a dummy file to ensure plugins folder exists in zip
-          echo "Place plugins here" > release_dir/plugins/put_scripts_here.txt
-
-      - name: Prepare Release Folder (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir release_dir
-          mkdir release_dir/plugins
-          cp -r yt_music.app release_dir/
           echo "Place plugins here" > release_dir/plugins/put_scripts_here.txt
 
       - name: Zip Release
