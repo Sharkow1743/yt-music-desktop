@@ -102,3 +102,10 @@ ytmusic-player-page {
 .mesh-blob:nth-child(3n+3) { background: var(--accent); }
 .mesh-blob:nth-child(3n+4) { background: #ffffff; opacity: 0.1 !important; }
 .mesh-blob:nth-child(3n+5) { background: #000000; opacity: 0.5 !important; }
+
+#song-media-window,
+#player,
+#movie_player,
+#song-video > div.player-wrapper {
+    background-color: transparent;
+}

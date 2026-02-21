@@ -1,135 +1,17 @@
-/* --- Hiding Default YouTube Elements --- */
-ytmusic-description-shelf-renderer .description.ytmusic-description-shelf-renderer,
-ytmusic-description-shelf-renderer .footer.ytmusic-description-shelf-renderer,
-ytmusic-message-renderer.ytmusic-tab-renderer,
-.loading-spinner.ytmusic-tab-renderer {
-    display: none !important;
+/* --- ACCENT DEFINITION --- */
+:root {
+    /* If --accent is not provided by the app, it defaults to YouTube Red */
+    --lyric-inactive: rgba(255, 255, 255, 0.2);
+    --lyric-past: rgba(255, 255, 255, 0.35);
 }
 
-/* Ensure the shelf itself doesn't collapse but hides its original children */
-ytmusic-description-shelf-renderer {
-    display: block !important;
-    padding-top: 20px !important;
-}
-
-#tab-renderer {
-    container-type: size !important;
-    container-name: lyrics-wrapper !important;
-}
-
-/* --- Main Lyrics Container --- */
-#plugin-lyrics-container {
-    width: 100%;
-    padding: calc(50cqh - 1.5em) 2% !important; 
-    box-sizing: border-box;
-    display: flex !important;
-    flex-direction: column;
-    gap: 16px;
-    background: transparent;
-    
-    /* Optional: Hide scrollbar for a cleaner look while keeping functionality */
-    scrollbar-width: none; /* Firefox */
-}
-
-/* Hide scrollbar for Chrome/Safari/Edge */
-#plugin-lyrics-container::-webkit-scrollbar {
-    display: none;
-}
-
-/* --- Lyrics Lines --- */
-.synced-line {
-    font-size: 500%;
-    line-height: 1.3;
-    font-weight: 800;
-    font-family: 'YouTube Sans', 'Roboto', sans-serif;
-    color: rgba(255, 255, 255, 0.15);
-    transition: transform 0.4s ease, filter 0.4s ease, opacity 0.4s ease;
-    cursor: pointer;
-    filter: blur(1px);
-    
-    /* KEY CHANGE: Enable Wrapping */
-    white-space: pre-wrap;      
-    word-wrap: break-word;      
-    overflow-wrap: break-word;  
-    max-width: 100%;           
-}
-
-.synced-line.current {
-    transform: scale(1.02); /* Slight pop */
-    filter: blur(0px);
-    opacity: 1;
-    /* Optional: Add a left border or indicator for current line */
-    /* border-left: 4px solid var(--accent-light); */
-    /* padding-left: 10px; */
-}
-
-.synced-line.past {
-    opacity: 0.4;
-    filter: blur(0px);
-}
-
-/* --- Words and Characters --- */
-.word {
-    display: inline-block;
-    /* KEY CHANGE: Allow words to wrap naturally */
-    white-space: pre-wrap; 
-}
-
-.char {
-    color: rgba(255, 255, 255, 0.2);
-    transition: color 0.15s ease;
-}
-
-.synced-line.current .char.active {
-    color: var(--accent-light);
-    text-shadow: 0 0 20px var(--accent-alpha-50);
-}
-
-.synced-line.past .char {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-/* --- Fancier Status Text --- */
-.status {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--accent-light);
-    text-align: center;
-    
-    /* Centering the status box */
-    margin: 0 auto;
-    width: fit-content;
-    
-    /* Glassmorphism Style */
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    
-    /* Spacing and Rounding */
-    padding: 12px 24px;
-    border-radius: 50px;
-    
-    /* Typography */
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-    
-    /* Animation */
-    animation: statusPulse 3s infinite ease-in-out;
-}
-
-@keyframes statusPulse {
-    0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.1); }
-    50% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
-}
-
-/* --- YouTube Music Overrides --- */
+/* --- TAB UNLOCKER & UI OVERRIDES --- */
+/* Force the lyrics tab content to be visible */
 ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
     display: block !important;
 }
 
+/* Re-enable the tab button if YouTube disables it */
 tp-yt-paper-tab[aria-disabled="true"],
 tp-yt-paper-tab[disabled] {
     pointer-events: auto !important;
@@ -137,11 +19,147 @@ tp-yt-paper-tab[disabled] {
     opacity: 1 !important;
 }
 
-tp-yt-paper-tab[aria-disabled="true"] .tab-content {
-    opacity: 1 !important;
-    color: var(--ytmusic-nav-bar-text-color, #fff) !important;
+/* Hide original static elements */
+ytmusic-description-shelf-renderer .description.ytmusic-description-shelf-renderer,
+ytmusic-description-shelf-renderer .footer.ytmusic-description-shelf-renderer,
+ytmusic-message-renderer.ytmusic-tab-renderer,
+.loading-spinner.ytmusic-tab-renderer {
+    display: none !important;
 }
 
-ytmusic-section-list-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
-    display: unset !important;
+/* Ensure the wrapper allows our custom container to scroll */
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] #contents {
+    display: flex;
+    flex-direction: column;
+}
+
+/* --- MAIN LYRICS CONTAINER --- */
+#plugin-lyrics-container {
+    width: 100%;
+    /* 40vh padding ensures the active line remains visually centered while scrolling */
+    padding: 40vh 10% !important; 
+    box-sizing: border-box;
+    display: flex !important;
+    flex-direction: column;
+    gap: 30px;
+    background: transparent;
+    transition: all 0.5s ease;
+}
+
+/* --- BASE LINE STYLING --- */
+.synced-line {
+    font-size: 3.8rem;
+    line-height: 1.15;
+    font-weight: 800;
+    font-family: 'YouTube Sans', 'Roboto', sans-serif;
+    color: var(--lyric-inactive);
+    transition: transform 0.6s cubic-bezier(0.1, 0.9, 0.2, 1), 
+                filter 0.6s ease, 
+                opacity 0.6s ease;
+    cursor: pointer;
+    filter: blur(1.5px);
+    transform: scale(0.96);
+    transform-origin: left center;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* --- SINGER TYPES (Layer 3) --- */
+.synced-line.bg {
+    font-size: 2.5rem;
+    font-style: italic;
+    font-weight: 600;
+    opacity: 0.5;
+}
+
+.synced-line.v2 {
+    text-align: right;
+    transform-origin: right center;
+}
+
+/* --- ACTIVE & PAST STATES --- */
+.synced-line.current {
+    transform: scale(1.05);
+    filter: blur(0px);
+    opacity: 1;
+    color: #ffffff; /* Base color for current line */
+    z-index: 10;
+}
+
+.synced-line.past {
+    opacity: 0.4;
+    filter: blur(0px);
+    transform: scale(0.92);
+    color: var(--lyric-past);
+}
+
+/* --- THE SYNC ENGINE (Negative Delay Technique) --- */
+.synced-line.current .word {
+    display: inline-block;
+    background-image: linear-gradient(to right, 
+        var(--accent) 0%, 
+        var(--accent) 100%
+    );
+    background-clip: text;
+    -webkit-background-clip: text;
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
+    
+    /* Hardware accelerated animation */
+    animation: fill-text var(--word-duration) linear forwards;
+    /* Scrubbing via negative delay */
+    animation-delay: calc((var(--line-offset) - var(--word-start)) * -1s);
+    animation-play-state: paused;
+    
+    /* Subtle glow on active text */
+    text-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes fill-text {
+    from { background-size: 0% 100%; }
+    to { background-size: 100% 100%; }
+}
+
+/* --- INSTRUMENTAL DETECTION (Layer 4) --- */
+.synced-line.instrumental {
+    opacity: 0.6;
+    display: flex;
+    justify-content: center;
+    margin: 40px 0;
+}
+
+.synced-line.instrumental .word {
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    padding: 12px 24px;
+    border: 2px solid var(--accent);
+    border-radius: 100px;
+    color: var(--accent);
+    background: transparent !important;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.4; transform: scale(0.95); }
+    50% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0.4; transform: scale(0.95); }
+}
+
+/* --- GLASSMORPHISM STATUS --- */
+.status {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    margin: 20px auto;
+    width: fit-content;
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 10px 20px;
+    border-radius: 100px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
 }

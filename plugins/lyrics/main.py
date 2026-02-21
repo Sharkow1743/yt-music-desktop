@@ -7,6 +7,99 @@ import random
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+class LyricParser:
+    @staticmethod
+    def parse_time(time_str: str) -> float:
+        if not time_str: return 0.0
+        try:
+            parts = time_str.split(':')
+            return int(parts[0]) * 60 + float(parts[1])
+        except: return 0.0
+
+    @staticmethod
+    def normalize_text(text: str) -> str:
+        # Layer 3: JSON3 Sanitization/Normalization
+        if not text: return ""
+        upper_count = sum(1 for c in text if c.isupper())
+        if len(text) > 0 and (upper_count / len(text)) > 0.9:
+            return text.capitalize()
+        return text
+
+    @staticmethod
+    def process_lrc(lrc_content: str) -> list[dict]:
+        lines = []
+        raw_lines = lrc_content.splitlines()
+        line_reg = re.compile(r'^\[(\d+:\d+\.\d+)\](.*)')
+        word_reg = re.compile(r'<(\d+:\d+\.\d+)>')
+
+        for line in raw_lines:
+            match = line_reg.match(line.strip())
+            if not match: continue
+
+            start_time = LyricParser.parse_time(match.group(1))
+            content = match.group(2).strip()
+            
+            # Agent/Singer detection (Layer 3)
+            singer_type = "main"
+            singer_match = re.match(r'^(v\d+|bg):', content)
+            if singer_match:
+                singer_type = singer_match.group(1)
+                content = content[len(singer_match.group(0)):].strip()
+
+            words = []
+            if '<' in content:
+                parts = word_reg.split(content)
+                current_time = start_time
+                for i in range(0, len(parts), 2):
+                    text = parts[i] # Keep spaces for processing
+                    if not text and i == 0: continue
+                    
+                    next_time = LyricParser.parse_time(parts[i+1]) if i+1 < len(parts) else current_time + 0.5
+                    
+                    # Layer 3: Space-Merge Logic
+                    # If text is just whitespace, merge duration into the previous word
+                    if text.strip() == "" and len(words) > 0:
+                        words[-1]["endTime"] = next_time
+                        words[-1]["duration"] = words[-1]["endTime"] - words[-1]["startTime"]
+                    else:
+                        words.append({
+                            "text": LyricParser.normalize_text(text),
+                            "startTime": current_time,
+                            "endTime": next_time,
+                            "duration": max(0.1, next_time - current_time) # Stutter prevention
+                        })
+                    current_time = next_time
+            else:
+                words.append({
+                    "text": LyricParser.normalize_text(content), 
+                    "startTime": start_time, 
+                    "endTime": start_time + 3.0,
+                    "duration": 3.0
+                })
+
+            lines.append({
+                "startTime": start_time,
+                "endTime": words[-1]["endTime"] if words else start_time + 3.0,
+                "type": singer_type,
+                "words": words
+            })
+
+        # Layer 4: Instrumental Detection
+        processed_lines = []
+        for i in range(len(lines)):
+            processed_lines.append(lines[i])
+            if i < len(lines) - 1:
+                gap = lines[i+1]["startTime"] - lines[i]["endTime"]
+                if gap > 5.0: # 5 second gap
+                    processed_lines.append({
+                        "startTime": lines[i]["endTime"] + 0.5,
+                        "endTime": lines[i+1]["startTime"] - 0.5,
+                        "type": "instrumental",
+                        "words": [{"text": "Instrumental", "startTime": lines[i]["endTime"] + 0.5, "duration": gap - 1.0}]
+                    })
+
+        return sorted(processed_lines, key=lambda x: x['startTime'])
+
 class LyricsProvider:
     def __init__(self, id, name, logger):
         self.id = id
@@ -59,14 +152,14 @@ class LyricsProvider:
         
         return unique_vars
 
-    def get_lyrics(self, artist, title, album, duration) -> Optional[tuple[str, str]]:
+    def request(self, artist, title, album, duration) -> Optional[str]:
         """
         Abstract method to be implemented by child classes.
-        Must return a tuple (synced, plain) or None.
+        Must return a string with lrc or None.
         """
         raise NotImplementedError
 
-    def search(self, artist, title, album, duration):
+    def search(self, artist, title, album, duration) -> Optional[list[dict]]:
         """
         Main entry point. Generates variations and calls get_lyrics 
         until a match is found.
@@ -78,15 +171,11 @@ class LyricsProvider:
                 self.log.verbose(f"{self.name}: Trying '{q['a']}' - '{q['t']}'")
                 
                 # Perform the specific provider request
-                synced, plain = self.get_lyrics(q['a'], q['t'], q['alb'], duration)
+                lrc = self.request(q['a'], q['t'], q['alb'], duration)
                 
-                if synced or plain:
-                    self.log.success(f"{self.name}: Match found using '{q['a']}'")
-                    return {
-                        "provider": self.name,
-                        "synced": synced,
-                        "plain": plain
-                    }
+                if lrc:
+                    self.log.success(f"{self.name}: Match found using '{q['a']}' = '{q['t']}")
+                    return LyricParser.process_lrc(lrc)
             except Exception as e:
                 # Log error but continue to next variation
                 self.log.error(f"{self.name}: Error processing '{q['a']}': {str(e)}")
@@ -110,7 +199,7 @@ class LRCLibProvider(LyricsProvider):
         retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
-    def get_lyrics(self, artist, title, album, duration):
+    def request(self, artist, title, album, duration):
         params = {
             "artist_name": artist,
             "track_name": title,
@@ -127,11 +216,7 @@ class LRCLibProvider(LyricsProvider):
         
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("syncedLyrics") or data.get("plainLyrics"):
-                return (
-                    data.get("syncedLyrics"),
-                    data.get("plainLyrics")
-                )
+            return data.get("syncedLyrics")
         elif resp.status_code == 404:
             return None
         else:
@@ -167,13 +252,13 @@ class Main:
         for p_id in priority:
             if p_id in self.providers:
                 result = self.providers[p_id].search(artist, title, album, duration)
-                if result: return result
+                if result: return {"synced": result}
 
         # 2. Try remaining providers
         for p_id, provider in self.providers.items():
             if p_id not in priority:
                 result = provider.search(artist, title, album, duration)
-                if result: return result
+                if result: return {"synced": result}
         
         self.log.notice(f"No lyrics found for {artist} - {title} across all providers.")
         return {"error": "Not found"}
