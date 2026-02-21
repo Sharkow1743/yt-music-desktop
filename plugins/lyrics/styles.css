@@ -1,165 +1,171 @@
-/* --- ACCENT DEFINITION --- */
 :root {
-    /* If --accent is not provided by the app, it defaults to YouTube Red */
     --lyric-inactive: rgba(255, 255, 255, 0.2);
-    --lyric-past: rgba(255, 255, 255, 0.35);
+    --accent-light: #ffffff;
 }
 
-/* --- TAB UNLOCKER & UI OVERRIDES --- */
-/* Force the lyrics tab content to be visible */
+/* --- FORCE TAB VISIBILITY & HIDE QUEUE --- */
 ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
     display: block !important;
+    visibility: visible !important;
 }
 
-/* Re-enable the tab button if YouTube disables it */
-tp-yt-paper-tab[aria-disabled="true"],
-tp-yt-paper-tab[disabled] {
-    pointer-events: auto !important;
-    cursor: pointer !important;
-    opacity: 1 !important;
-}
-
-/* Hide original static elements */
-ytmusic-description-shelf-renderer .description.ytmusic-description-shelf-renderer,
-ytmusic-description-shelf-renderer .footer.ytmusic-description-shelf-renderer,
-ytmusic-message-renderer.ytmusic-tab-renderer,
-.loading-spinner.ytmusic-tab-renderer {
+/* Hide EVERYTHING inside the lyrics tab except our container */
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] #contents > *:not(#plugin-lyrics-container),
+ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #plugin-lyrics-container,
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-player-queue-item,
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] .message {
     display: none !important;
 }
 
-/* Ensure the wrapper allows our custom container to scroll */
-ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] #contents {
-    display: flex;
-    flex-direction: column;
-}
-
-/* --- MAIN LYRICS CONTAINER --- */
-#plugin-lyrics-container {
-    width: 100%;
-    /* 40vh padding ensures the active line remains visually centered while scrolling */
-    padding: 40vh 10% !important; 
-    box-sizing: border-box;
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] #plugin-lyrics-container {
     display: flex !important;
+}
+
+#plugin-lyrics-container {
+    display: flex;
+    width: 100%;
+    padding: 40vh 10% 50vh 10% !important;
+    box-sizing: border-box;
     flex-direction: column;
-    gap: 30px;
-    background: transparent;
-    transition: all 0.5s ease;
+    gap: 40px;
+    z-index: 999;
 }
 
-/* --- BASE LINE STYLING --- */
+#plugin-lyrics-container.active-view {
+    display: flex !important;
+}
+
+/* --- IMPROVED TIMING & KARAOKE --- */
 .synced-line {
-    font-size: 3.8rem;
-    line-height: 1.15;
+    font-size: 3rem;
+    line-height: 1.2;
     font-weight: 800;
-    font-family: 'YouTube Sans', 'Roboto', sans-serif;
+    font-family: 'YouTube Sans', sans-serif;
     color: var(--lyric-inactive);
-    transition: transform 0.6s cubic-bezier(0.1, 0.9, 0.2, 1), 
-                filter 0.6s ease, 
-                opacity 0.6s ease;
-    cursor: pointer;
-    filter: blur(1.5px);
-    transform: scale(0.96);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    filter: blur(2px);
+    transform: scale(0.95);
     transform-origin: left center;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+    cursor: pointer;
 }
 
-/* --- SINGER TYPES (Layer 3) --- */
-.synced-line.bg {
-    font-size: 2.5rem;
-    font-style: italic;
-    font-weight: 600;
-    opacity: 0.5;
-}
-
-.synced-line.v2 {
-    text-align: right;
-    transform-origin: right center;
-}
-
-/* --- ACTIVE & PAST STATES --- */
 .synced-line.current {
-    transform: scale(1.05);
+    color: #ffffff; /* This acts as the base color for the "unfilled" part of the word */
     filter: blur(0px);
+    transform: scale(1.08);
     opacity: 1;
-    color: #ffffff; /* Base color for current line */
-    z-index: 10;
 }
 
-.synced-line.past {
-    opacity: 0.4;
-    filter: blur(0px);
-    transform: scale(0.92);
-    color: var(--lyric-past);
-}
-
-/* --- THE SYNC ENGINE (Negative Delay Technique) --- */
 .synced-line.current .word {
-    display: inline-block;
-    background-image: linear-gradient(to right, 
-        var(--accent) 0%, 
-        var(--accent) 100%
-    );
+    /* 1. Make the text transparent so backgrounds show through */
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    
+    /* 2. Layer 1: The Accent (Top), Layer 2: The Base White (Bottom) */
+    background-image: 
+        linear-gradient(var(--accent-light), var(--accent-light)), 
+        linear-gradient(#ffffff, #ffffff);
+    
     background-clip: text;
     -webkit-background-clip: text;
     background-repeat: no-repeat;
-    background-size: 0% 100%;
     
-    /* Hardware accelerated animation */
-    animation: fill-text var(--word-duration) linear forwards;
-    /* Scrubbing via negative delay */
+    /* 3. Set the sizes: Accent starts at 0%, White is always 100% */
+    background-size: 0% 100%, 100% 100%;
+    
+    /* 4. Add the Glow: Only applied to the visible parts of the background */
+    /* Adjust the 12px for more/less glow intensity */
+    filter: drop-shadow(0 0 12px var(--accent-light));
+
+    /* 5. Update the animation to handle TWO background sizes */
+    animation: fill-text calc(var(--word-duration) * 1s) linear both;
     animation-delay: calc((var(--line-offset) - var(--word-start)) * -1s);
     animation-play-state: paused;
-    
-    /* Subtle glow on active text */
-    text-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
 }
 
+/* Keyframe must animate the first background-size while keeping the second at 100% */
 @keyframes fill-text {
-    from { background-size: 0% 100%; }
-    to { background-size: 100% 100%; }
+    from { 
+        background-size: 0% 100%, 100% 100%; 
+    }
+    to { 
+        background-size: 100% 100%, 100% 100%; 
+    }
 }
 
-/* --- INSTRUMENTAL DETECTION (Layer 4) --- */
-.synced-line.instrumental {
-    opacity: 0.6;
+/* --- FANCY INSTRUMENTAL --- */
+.dots {
     display: flex;
-    justify-content: center;
-    margin: 40px 0;
+    gap: 12px;
 }
 
-.synced-line.instrumental .word {
-    font-size: 1rem;
-    text-transform: uppercase;
-    letter-spacing: 4px;
-    padding: 12px 24px;
-    border: 2px solid var(--accent);
-    border-radius: 100px;
-    color: var(--accent);
-    background: transparent !important;
-    animation: pulse 2s infinite;
+.dot {
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-radius: 50%;
+    opacity: 0.2;
+    animation: dot-pulse 1.8s infinite ease-in-out;
 }
 
-@keyframes pulse {
-    0% { opacity: 0.4; transform: scale(0.95); }
-    50% { opacity: 1; transform: scale(1); }
-    100% { opacity: 0.4; transform: scale(0.95); }
+.dot:nth-child(1) { animation-delay: 0s; }
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dot-pulse {
+    0%, 100% { 
+        transform: scale(0.8); 
+        opacity: 0.2; 
+        box-shadow: 0 0 0px rgba(255,255,255,0);
+    }
+    50% { 
+        transform: scale(1.4); 
+        opacity: 0.9;
+        box-shadow: 0 0 15px rgba(255,255,255,0.5);
+    }
 }
 
-/* --- GLASSMORPHISM STATUS --- */
 .status {
-    font-size: 11px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.5);
-    text-align: center;
-    margin: 20px auto;
-    width: fit-content;
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 10px 20px;
-    border-radius: 100px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
+    color: rgba(255,255,255,0.4);
+    font-family: monospace;
+    letter-spacing: 4px;
+    font-size: 2em;
+}
+
+.instrumental-animation {
+    /* Configuration */
+    --stripe-width: 30px;
+    --stripe-color: rgba(255, 255, 255, 0.1);
+    --speed: 40px; /* How many pixels the stripes move per second */
+    
+    width: 100%;
+    height: 100px;
+    background-color: transparent;
+    
+    /* The Caution Pattern */
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--stripe-color),
+        var(--stripe-color) var(--stripe-width),
+        transparent var(--stripe-width),
+        transparent calc(var(--stripe-width) * 2)
+    );
+    
+    /* 2.828 (sqrt 2 * 2) makes the 45deg pattern seamless */
+    background-size: calc(var(--stripe-width) * 2.828) 100%;
+    
+    /* SYNC MAGIC: This moves the background based on the song's time */
+    /* Because JS updates --line-offset every frame, this will move automatically */
+    background-position: calc(var(--line-offset) * var(--speed)) 0;
+    
+    transition: background 0.5s ease;
+}
+
+/* --- LIGHT UP WHEN CURRENT --- */
+.synced-line.current .instrumental-animation {
+    --stripe-color: var(--accent-light);
+}
+
+ytmusic-message-renderer {
+    display: none !important;
 }

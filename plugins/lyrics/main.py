@@ -32,6 +32,7 @@ class LyricParser:
         line_reg = re.compile(r'^\[(\d+:\d+\.\d+)\](.*)')
         word_reg = re.compile(r'<(\d+:\d+\.\d+)>')
 
+        # 1. Initial Parse
         for line in raw_lines:
             match = line_reg.match(line.strip())
             if not match: continue
@@ -39,66 +40,70 @@ class LyricParser:
             start_time = LyricParser.parse_time(match.group(1))
             content = match.group(2).strip()
             
-            # Agent/Singer detection (Layer 3)
             singer_type = "main"
-            singer_match = re.match(r'^(v\d+|bg):', content)
-            if singer_match:
-                singer_type = singer_match.group(1)
-                content = content[len(singer_match.group(0)):].strip()
+            if content.startswith('v2:'): singer_type = "v2"
+            elif content.startswith('bg:'): singer_type = "bg"
+            
+            # If the line is empty or explicitly says instrumental, mark it
+            if "instrumental" in content.lower():
+                singer_type = "instrumental"
+                content = "" # Clear text
 
             words = []
-            if '<' in content:
+            # Only process words if not instrumental
+            if singer_type != "instrumental" and '<' in content:
                 parts = word_reg.split(content)
                 current_time = start_time
                 for i in range(0, len(parts), 2):
-                    text = parts[i] # Keep spaces for processing
+                    text = parts[i]
                     if not text and i == 0: continue
+                    next_time = LyricParser.parse_time(parts[i+1]) if i+1 < len(parts) else 0
                     
-                    next_time = LyricParser.parse_time(parts[i+1]) if i+1 < len(parts) else current_time + 0.5
-                    
-                    # Layer 3: Space-Merge Logic
-                    # If text is just whitespace, merge duration into the previous word
-                    if text.strip() == "" and len(words) > 0:
+                    if text.strip() == "" and len(words) > 0 and next_time > 0:
                         words[-1]["endTime"] = next_time
-                        words[-1]["duration"] = words[-1]["endTime"] - words[-1]["startTime"]
+                        words[-1]["duration"] = next_time - words[-1]["startTime"]
                     else:
                         words.append({
-                            "text": LyricParser.normalize_text(text),
+                            "text": text,
                             "startTime": current_time,
-                            "endTime": next_time,
-                            "duration": max(0.1, next_time - current_time) # Stutter prevention
+                            "endTime": next_time if next_time > 0 else current_time + 0.3,
+                            "duration": 0.3
                         })
-                    current_time = next_time
+                    if next_time > 0: current_time = next_time
             else:
-                words.append({
-                    "text": LyricParser.normalize_text(content), 
-                    "startTime": start_time, 
-                    "endTime": start_time + 3.0,
-                    "duration": 3.0
-                })
+                # Fallback for line-by-line or instrumental
+                words.append({"text": content, "startTime": start_time, "duration": 0})
 
             lines.append({
                 "startTime": start_time,
-                "endTime": words[-1]["endTime"] if words else start_time + 3.0,
                 "type": singer_type,
                 "words": words
             })
 
-        # Layer 4: Instrumental Detection
-        processed_lines = []
+        # 2. Fix Line-by-Line Timing & Automatic Gap Detection
+        processed = []
         for i in range(len(lines)):
-            processed_lines.append(lines[i])
+            curr = lines[i]
+            next_start = lines[i+1]["startTime"] if i+1 < len(lines) else curr["startTime"] + 5.0
+            line_duration = next_start - curr["startTime"]
+            
+            if curr["type"] != "instrumental" and len(curr["words"]) == 1 and curr["words"][0]["duration"] == 0:
+                curr["words"][0]["duration"] = line_duration
+                curr["words"][0]["endTime"] = next_start
+
+            processed.append(curr)
+
+            # Auto-insert instrumental if there's a large gap ( > 4 seconds)
             if i < len(lines) - 1:
-                gap = lines[i+1]["startTime"] - lines[i]["endTime"]
-                if gap > 5.0: # 5 second gap
-                    processed_lines.append({
-                        "startTime": lines[i]["endTime"] + 0.5,
-                        "endTime": lines[i+1]["startTime"] - 0.5,
+                gap = lines[i+1]["startTime"] - (curr["startTime"] + (line_duration if curr["type"] != "instrumental" else 0))
+                if gap > 4.0:
+                    processed.append({
+                        "startTime": curr["startTime"] + (line_duration if curr["type"] != "instrumental" else 2.0),
                         "type": "instrumental",
-                        "words": [{"text": "Instrumental", "startTime": lines[i]["endTime"] + 0.5, "duration": gap - 1.0}]
+                        "words": [{"text": "", "startTime": 0, "duration": gap}]
                     })
 
-        return sorted(processed_lines, key=lambda x: x['startTime'])
+        return sorted(processed, key=lambda x: x['startTime'])
 
 class LyricsProvider:
     def __init__(self, id, name, logger):
@@ -115,7 +120,7 @@ class LyricsProvider:
         text = re.sub(r'(?i)(full\s+)?hd|4k|hq', '', text)
         return text.strip()
 
-    def _get_variations(self, artist, title, album):
+    def _get_variations(self, artist, title, album = None, duration = None, id = None):
         """Generates a list of search queries from most specific to most generic."""
         variations = []
 
@@ -152,14 +157,14 @@ class LyricsProvider:
         
         return unique_vars
 
-    def request(self, artist, title, album, duration) -> Optional[str]:
+    def request(self, artist, title, album = None, duration = None, id = None) -> Optional[str]:
         """
         Abstract method to be implemented by child classes.
         Must return a string with lrc or None.
         """
         raise NotImplementedError
 
-    def search(self, artist, title, album, duration) -> Optional[list[dict]]:
+    def search(self, artist, title, album = None, duration = None, id = None) -> Optional[list[dict]]:
         """
         Main entry point. Generates variations and calls get_lyrics 
         until a match is found.
@@ -199,7 +204,7 @@ class LRCLibProvider(LyricsProvider):
         retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
-    def request(self, artist, title, album, duration):
+    def request(self, artist, title, album = None, duration = None, id = None):
         params = {
             "artist_name": artist,
             "track_name": title,

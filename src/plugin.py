@@ -100,11 +100,9 @@ class Plugin:
         except Exception as e:
             self.log.error(f"Failed to parse manifest: {e}")
             return
-        
-        # --- NEW: Install Dependencies ---
+
         if self.manifest.dependencies:
             self._install_dependencies()
-        # ---------------------------------
 
         if self.manifest.python_script:
             self._load_python_module()
@@ -176,6 +174,18 @@ class Plugin:
 
     def apply(self, window: webview.Window):
         self.log.info(f"Injecting {self.manifest.name}...")
+
+        if self.python_instance:
+            self.python_instance.window = window
+            self.log.verbose('Found python inctance. Injected window')
+            
+            # 2. (Optional) Call a lifecycle method if the plugin defines it
+            if hasattr(self.python_instance, 'on_ready'):
+                try:
+                    self.log.verbose(f"Calling on_ready for {self.manifest.name}")
+                    self.python_instance.on_ready()
+                except Exception as e:
+                    self.log.error(f"Error in {self.manifest.name} on_ready: {e}")
 
         # 1. Prepare Configuration
         config_data = {prop.name: prop.value for prop in self.manifest.config}

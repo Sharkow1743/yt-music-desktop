@@ -4,14 +4,9 @@
     "python_script": "main.py",
     "config": [
         {
-            "name": "auto_scroll",
-            "type": "bool",
-            "default": true
-        },
-        {
             "name": "provider_priority",
             "type": "list[str]",
-            "default": ["lrclib", "dummy"]
+            "default": []
         }
     ]
 }

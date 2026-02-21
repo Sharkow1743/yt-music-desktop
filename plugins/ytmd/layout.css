@@ -30,7 +30,7 @@ ytmusic-player {
 .ytmusic-player-page {
 	--ytmusic-player-page-vertical-padding: 0 !important;
 	--ytmusic-player-page-horizontal-padding: 3% !important;
-	--ytmusic-player-page-content-gap: 1% !important;
+	--ytmusic-player-page-content-gap: 5% !important;
 	--ytmusic-player-page-side-panel-width: unset !important;
 	justify-content: space-between !important;
     padding-left: 5%;
@@ -108,4 +108,13 @@ ytmusic-player-page {
 #movie_player,
 #song-video > div.player-wrapper {
     background-color: transparent;
+    padding: 0;
+}
+
+#song-media-window {
+    display: none;
+}
+
+#main-panel > * {
+    pointer-events: none !important;
 }

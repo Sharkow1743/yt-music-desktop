@@ -1,145 +1,200 @@
 (function() {
     let lastTrackKey = "";
-    let lyricLines = [];
-    let lyricChars = [];
-    let lastActiveLineIdx = -1;
+    let lyricsData = [];
+    let lastActiveIdx = -1;
     let isFetching = false;
 
-    // --- TAB UNLOCKER (Polymer Compatible) ---
-    const unlockTabs = () => {
-        const tabs = document.querySelector('#tabsContent'); 
-        if (!tabs) return;
-        const tab = tabs.querySelectorAll('tp-yt-paper-tab')[1];
-        if (!tab || tab.disabled === false) return;
+    // Selectors
+    const LYRICS_TAB_INDEX = 1; // The "Lyrics" tab is usually the second one
+    const TAB_BUTTON_SELECTOR = 'ytmusic-player-page #tabsContent tp-yt-paper-tab';
+    const RENDERER_SELECTOR = 'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]';
 
-        tab.removeAttribute('disabled');
-        tab.setAttribute('aria-disabled', 'false');
-        tab.disabled = false;
-        tab.style.pointerEvents = 'auto';
-        tab.style.cursor = 'pointer';
-        tab.style.opacity = '1';
-    };
-
-    const uiObserver = new MutationObserver(unlockTabs);
-    uiObserver.observe(document.body, { attributes: true, childList: true, subtree: true });
-
-    // --- LYRICS ENGINE ---
-    async function checkAndRefresh() {
-        if (isFetching) return;
-
-        const playerBar = document.querySelector('ytmusic-player-bar');
-        const lyricsTab = document.querySelector('ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]');
-        if (!playerBar || !lyricsTab || lyricsTab.offsetWidth === 0) return;
-
-        const title = playerBar.querySelector('.title')?.innerText;
-        const byline = playerBar.querySelector('.byline')?.innerText;
-        const artist = byline?.split(' • ')[0];
-        const key = `${title}-${artist}`;
-
-        if (key === lastTrackKey && document.getElementById('plugin-lyrics-container')) return;
-
-        isFetching = true;
-        lastTrackKey = key;
-
-        let container = document.getElementById('plugin-lyrics-container');
-        if (!container) {
-            container = document.createElement('div');
-            container.id = 'plugin-lyrics-container';
-            const shelf = lyricsTab.querySelector('ytmusic-description-shelf-renderer') || lyricsTab.querySelector('#contents');
-            shelf.parentElement.insertBefore(container, shelf);
-            if (shelf.tagName === 'YTMUSIC-DESCRIPTION-SHELF-RENDERER') shelf.style.display = 'none';
+    /**
+     * 1. TAB UNLOCKER
+     * Forces the tab to be clickable and visible even if YT says no lyrics exist.
+     */
+    const unlockUI = () => {
+        const tabs = document.querySelectorAll(TAB_BUTTON_SELECTOR);
+        const lyricsTab = tabs[LYRICS_TAB_INDEX];
+        
+        if (lyricsTab) {
+            // Remove YT's "disabled" state
+            if (lyricsTab.hasAttribute('disabled')) {
+                lyricsTab.removeAttribute('disabled');
+                lyricsTab.setAttribute('aria-disabled', 'false');
+                lyricsTab.style.pointerEvents = 'all';
+                lyricsTab.style.opacity = '1';
+            }
         }
 
-        container.innerHTML = `<div class="status">Requesting backend for ${title}...</div>`;
+        // Force the renderer to be part of the DOM layout
+        const renderer = document.querySelector(RENDERER_SELECTOR);
+        if (renderer) {
+            renderer.style.display = 'block';
+            // Hide the "Lyrics not available" message renderer
+            const msg = renderer.querySelector('ytmusic-message-renderer');
+            if (msg) msg.style.display = 'none';
+            const wrapper = renderer.querySelector('div.ytmusic-tab-renderer')
+            wrapper.removeAttribute('hidden')
+        }
+    };
+
+    /**
+     * 2. DATA FETCHING & INJECTION
+     */
+    async function updateLyrics() {
+        if (isFetching) return;
+
+        // Check if the Lyrics Tab is actually selected by looking at the tab button
+        const tabs = document.querySelectorAll(TAB_BUTTON_SELECTOR);
+        const lyricsTab = tabs[LYRICS_TAB_INDEX];
+        const isTabSelected = lyricsTab && lyricsTab.getAttribute('aria-selected') === 'true';
+        
+        const container = document.getElementById('plugin-lyrics-container');
+
+        if (!isTabSelected) {
+            if (container) container.classList.remove('active-view');
+            return;
+        }
+
+        const playerBar = document.querySelector('ytmusic-player-bar');
+        const title = playerBar?.querySelector('.title')?.innerText;
+        const artist = playerBar?.querySelector('.byline')?.innerText?.split(' • ')[0];
+        
+        if (!title || !artist) return;
+        const key = `${title}-${artist}`;
+
+        // If track hasn't changed, just ensure view is active
+        if (key === lastTrackKey) {
+            if (container) container.classList.add('active-view');
+            return;
+        }
+        
+        isFetching = true;
+        lastTrackKey = key;
+        lastActiveIdx = -1;
 
         try {
-            // Calling the Python Backend (Bridge)
+            const renderer = document.querySelector(RENDERER_SELECTOR);
+            if (!renderer) throw "Renderer not found";
+
+            const activeContainer = getOrCreateContainer(renderer);
+            activeContainer.classList.add('active-view');
+            activeContainer.innerHTML = `
+                <div class="status-wrapper">
+                    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+                    <div class="status">FETCHING SYNCED DATA...</div>
+                </div>
+            `;
+            
             const data = await window.pywebview.api.lyrics.get_lyrics(artist, title);
             
             if (data?.synced) {
-                renderLyrics(data.synced, container);
+                render(data.synced, activeContainer);
             } else {
-                container.innerHTML = `<div class="status">No synchronized lyrics available</div>`;
+                activeContainer.innerHTML = `<div class="status">No synced lyrics found for this track</div>`;
             }
         } catch (e) {
-            container.innerHTML = `<div class="status">Search Failed</div>`;
-            console.log(e)
+            console.error("Lyrics Plugin Error:", e);
         } finally {
             isFetching = false;
         }
     }
 
-    function renderLyrics(parsedLines, container) {
+    function getOrCreateContainer(renderer) {
+        let c = document.getElementById('plugin-lyrics-container');
+        if (!c) {
+            c = document.createElement('div');
+            c.id = 'plugin-lyrics-container';
+            
+            // On songs with NO native lyrics, #contents might be empty or missing
+            // We target #contents if it exists, otherwise append to renderer root
+            const target = renderer;
+            target.prepend(c);
+        }
+        return c;
+    }
+
+    /**
+     * 3. RENDERER & SYNC
+     */
+    function render(lines, container) {
         container.innerHTML = "";
-        lyricLines = [];
-        lyricChars = [];
-        const video = document.querySelector('video');
+        lyricsData = lines;
+        const fragment = document.createDocumentFragment();
 
-        parsedLines.forEach((line) => {
+        lines.forEach((line) => {
             const lineDiv = document.createElement('div');
-            lineDiv.className = `synced-line ${line.type}`;
-            lineDiv.onclick = () => { if (video) video.currentTime = line.time; };
+            lineDiv.className = `synced-line ${line.type || 'line'}`;
+            
+            lineDiv.onclick = () => { 
+                const video = document.querySelector('video');
+                if(video) video.currentTime = line.startTime; 
+            };
 
-            line.words.forEach((word) => {
-                const wordSpan = document.createElement('span');
-                wordSpan.className = 'word';
-                
-                const charDuration = (word.endTime - word.startTime) / word.text.length;
+            if (line.type === 'instrumental') {
+                lineDiv.innerHTML = `<div class="instrumental-animation"></div>`;
+            } else {
+                line.words.forEach(word => {
+                    const wordSpan = document.createElement('span');
+                    wordSpan.className = 'word';
+                    const text = word.text + (word.text.endsWith(' ') ? '' : ' ');
+                    wordSpan.innerText = text;
+                    wordSpan.setAttribute('data-word', text.trim());
+                    wordSpan.style.setProperty('--word-start', parseFloat(word.startTime) - parseFloat(line.startTime));
+                    wordSpan.style.setProperty('--word-duration', parseFloat(word.duration));
+                    lineDiv.appendChild(wordSpan);
+                });
+            }
 
-                for (let i = 0; i < word.text.length; i++) {
-                    const charSpan = document.createElement('span');
-                    charSpan.className = 'char';
-                    charSpan.innerText = word.text[i];
-                    wordSpan.appendChild(charSpan);
-                    lyricChars.push({ el: charSpan, time: word.startTime + (i * charDuration) });
-                }
-                
-                lineDiv.appendChild(wordSpan);
-                // Add space
-                lineDiv.appendChild(document.createTextNode(' '));
-            });
-
-            container.appendChild(lineDiv);
-            lyricLines.push({ el: lineDiv, time: line.time });
+            line.el = lineDiv;
+            fragment.appendChild(lineDiv);
         });
-        lyricChars.sort((a, b) => a.time - b.time);
+
+        container.appendChild(fragment);
     }
 
     function syncLoop() {
         const video = document.querySelector('video');
-        if (!video || lyricLines.length === 0) {
+        const container = document.getElementById('plugin-lyrics-container');
+        
+        if (!video || !lyricsData.length || !container || !container.classList.contains('active-view')) {
             requestAnimationFrame(syncLoop);
             return;
         }
 
         const now = video.currentTime;
-        
-        // 1. Line Level
-        let activeLineIdx = -1;
-        for (let i = 0; i < lyricLines.length; i++) {
-            if (now >= lyricLines[i].time) activeLineIdx = i;
+        let activeIdx = -1;
+
+        for (let i = 0; i < lyricsData.length; i++) {
+            if (now >= lyricsData[i].startTime) activeIdx = i;
             else break;
         }
 
-        if (activeLineIdx !== lastActiveLineIdx) {
-            lyricLines.forEach((line, idx) => {
-                line.el.classList.toggle('current', idx === activeLineIdx);
-                line.el.classList.toggle('past', idx < activeLineIdx);
-                if (idx === activeLineIdx) line.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (activeIdx !== -1 && activeIdx !== lastActiveIdx) {
+            lyricsData.forEach((line, idx) => {
+                if (line.el) {
+                    line.el.classList.toggle('current', idx === activeIdx);
+                    line.el.classList.toggle('past', idx < activeIdx);
+                }
             });
-            lastActiveLineIdx = activeLineIdx;
+            
+            const activeEl = lyricsData[activeIdx].el;
+            if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            lastActiveIdx = activeIdx;
         }
 
-        // 2. Word/Char Level (Karaoke Highlighting)
-        if (!video.paused) {
-            lyricChars.forEach(char => {
-                char.el.classList.toggle('active', now >= char.time);
-            });
+        if (activeIdx !== -1) {
+            container.style.setProperty('--line-offset', now - lyricsData[activeIdx].startTime);
         }
 
         requestAnimationFrame(syncLoop);
     }
 
-    setInterval(checkAndRefresh, 1000);
+    // Initialize
+    const uiObserver = new MutationObserver(unlockUI);
+    uiObserver.observe(document.body, { attributes: true, childList: true, subtree: true });
+    
+    setInterval(updateLyrics, 1000);
     syncLoop();
 })();
