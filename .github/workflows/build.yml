@@ -42,11 +42,7 @@ jobs:
       - name: Build with Nuitka
         shell: bash
         run: |
-          python -m nuitka --standalone --onefile \
-          --windows-disable-console \
-          --plugin-enable=tk-inter \
-          --output-filename=yt_music \
-          src/main.py
+          python -m nuitka --standalone --onefile --windows-disable-console --plugin-enable=tk-inter --assume-yes-for-downloads --zig --output-filename=yt_music src/main.py
 
       - name: Prepare Release Folder (Windows/Linux)
         run: |

@@ -115,6 +115,10 @@ ytmusic-player-page {
     display: none;
 }
 
-#main-panel > * {
+#main-panel * {
     pointer-events: none !important;
+}
+
+#song-video, #song-image {
+    pointer-events: auto !important;
 }

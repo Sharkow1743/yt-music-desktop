@@ -84,8 +84,21 @@ ytmusic-player-queue-item[play-button-state=paused] {
     background: var(--accent) !important;
 }
 
-#mini-guide-background,
 #nav-bar-background {
-    background-color: transparent !important;
-    border-right: none !important;
+    /* Added !important to override default site colors */
+    background-color: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    color: rgba(255, 255, 255, 0.8) !important;
+
+    margin: 2px;
+    
+    /* Standard glassmorphism properties */
+    border-radius: 8px !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important; /* Safari support */
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+}
+
+#mini-guide-background {
+    display: none;
 }

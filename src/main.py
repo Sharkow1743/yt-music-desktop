@@ -28,7 +28,7 @@ def main():
     webview.start(
         private_mode=False, 
         storage_path=data_dir,
-        debug=False
+        debug=True
     )
 
 if __name__ == '__main__':

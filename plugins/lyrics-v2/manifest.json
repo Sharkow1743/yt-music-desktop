@@ -1,0 +1,33 @@
+{
+  "name": "Synced Lyrics",
+  "files": [
+    "frontend.js",
+    "style.css"
+  ],
+  "python_script": "main.py",
+  "dependencies": [
+    "requests"
+  ],
+  "config": [
+    {
+      "name": "enabled",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "name": "show_time_codes",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "name": "line_effect",
+      "type": "str",
+      "default": "fancy"
+    },
+    {
+      "name": "offset",
+      "type": "int",
+      "default": 0
+    }
+  ]
+}
