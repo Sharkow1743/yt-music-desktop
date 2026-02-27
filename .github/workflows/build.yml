@@ -4,11 +4,15 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -53,12 +57,16 @@ jobs:
         run: |
           mkdir release_dir
           mkdir release_dir/plugins
-          # Move the executable into the release folder
-          cp ${{ matrix.executable_name }} release_dir/
-          # Ensure a placeholder is in plugins so the folder is zipped
+          # Check if the file exists before copying to prevent silent failure
+          if [ -f "${{ matrix.executable_name }}" ]; then
+            cp "${{ matrix.executable_name }}" release_dir/
+          else
+            echo "Error: Binary ${{ matrix.executable_name }} not found!"
+            exit 1
+          fi
           echo "Place your plugins folder contents here" > release_dir/plugins/README.txt
-
-      - name: Zip Release (Cross-Platform)
+          
+      - name: Zip Release
         uses: thedoctor0/zip-release@0.7.6
         with:
           type: 'zip'
