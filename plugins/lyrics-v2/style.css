@@ -13,16 +13,25 @@ ytmusic-section-list-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
     display: block !important;
 }
 
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
+    overflow: visible;
+}
+
+ytmusic-message-renderer {
+    display: none !important;
+}
+
 /* --- 2. MAIN CONTAINER (Structure) --- */
 #sl-container, #plugin-lyrics-container {
     display: flex !important;
     flex-direction: column;
-    height: 100vh; /* Changed to vh to ensure it has height */
+    height: 100%; /* Changed to vh to ensure it has height */
     width: 100%;
     position: relative;
     font-family: var(--yt-sans);
     color: var(--ytmusic-text-primary);
     z-index: 999;
+    max-height: 100%;
 }
 
 #sl-header {

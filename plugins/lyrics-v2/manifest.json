@@ -6,7 +6,8 @@
   ],
   "python_script": "main.py",
   "dependencies": [
-    "requests"
+    "requests",
+    "beautifulsoup4"
   ],
   "config": [
     {

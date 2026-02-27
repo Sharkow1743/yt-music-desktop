@@ -13,10 +13,10 @@ jobs:
         include:
           - os: windows-latest
             asset_name: yt-music-win.zip
-            executable: yt_music.exe
-          - os: debian-latest
+            executable_name: yt_music.exe
+          - os: ubuntu-latest
             asset_name: yt-music-linux.zip
-            executable: yt_music.bin
+            executable_name: yt_music
 
     steps:
       - name: Checkout code
@@ -28,10 +28,10 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install Build Dependencies
         run: |
           pip install -r requirements.txt
-          pip install nuitka
+          pip install nuitka pydantic zstandard 
 
       - name: Install OS Specific Dependencies (Linux)
         if: runner.os == 'Linux'
@@ -39,24 +39,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev python3-dev build-essential
 
-      - name: Build with Nuitka
+      - name: Build with Nuitka (via build.py)
         shell: bash
         run: |
-          python -m nuitka --standalone --onefile --windows-disable-console --plugin-enable=tk-inter --assume-yes-for-downloads --zig --output-filename=yt_music src/main.py
+          # We run your custom build script so it detects plugin manifests 
+          # and adds --include-package flags automatically
+          python build.py
 
-      - name: Prepare Release Folder (Windows/Linux)
+      - name: Prepare Release Folder
+        shell: bash
         run: |
           mkdir release_dir
           mkdir release_dir/plugins
-          cp yt_music* release_dir/
-          # Copy a dummy file to ensure plugins folder exists in zip
-          echo "Place plugins here" > release_dir/plugins/put_scripts_here.txt
+          # Move the executable into the release folder
+          cp ${{ matrix.executable_name }} release_dir/
+          # Ensure a placeholder is in plugins so the folder is zipped
+          echo "Place your plugins folder contents here" > release_dir/plugins/README.txt
 
-      - name: Zip Release
-        shell: bash
-        run: |
-          cd release_dir
-          zip -r ../${{ matrix.asset_name }} .
+      - name: Zip Release (Cross-Platform)
+        uses: thedoctor0/zip-release@0.7.6
+        with:
+          type: 'zip'
+          filename: ${{ matrix.asset_name }}
+          directory: 'release_dir'
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1

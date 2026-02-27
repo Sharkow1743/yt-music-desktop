@@ -72,13 +72,11 @@ class Plugin:
         self.python_instance = None
         self._is_loaded = False
         
-        # Create a sub-logger for this specific plugin directory
         self.log = get_logger(f"plugin.{os.path.basename(folder)}")
         self.load()
 
     @property
     def is_valid(self) -> bool:
-        """Returns true if the manifest was loaded and parsed successfully."""
         return self._is_loaded
 
     def load(self):
@@ -101,57 +99,43 @@ class Plugin:
             self.log.error(f"Failed to parse manifest: {e}")
             return
 
-        if self.manifest.dependencies:
-            self._install_dependencies()
-
         if self.manifest.python_script:
             self._load_python_module()
         else:
             self.log.verbose("No python_script defined in manifest.")
 
-    def _install_dependencies(self):
-        """Installs dependencies listed in manifest using pip."""
-        # If running as a compiled EXE, we usually can't install new packages easily
-        if getattr(sys, 'frozen', False):
-            self.log.warning(f"App is frozen. Skipping auto-install of: {self.manifest.dependencies}")
-            return
-
-        packages = self.manifest.dependencies
-        self.log.info(f"Verifying dependencies: {', '.join(packages)}...")
-
-        try:
-            # sys.executable ensures we use the same python interpreter running this script
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install"] + packages,
-                stdout=subprocess.DEVNULL, # Suppress standard output to keep console clean
-                stderr=subprocess.PIPE     # Capture errors if it fails
-            )
-            self.log.success("Dependencies verified.")
-        except subprocess.CalledProcessError as e:
-            # Decode stderr to show the user what went wrong
-            error_msg = e.stderr.decode() if e.stderr else str(e)
-            self.log.error(f"Failed to install dependencies: {error_msg}")
-
     def _load_python_module(self):
+        """
+        Loads the plugin's Python module, temporarily adding its 'lib' 
+        directory to the system path to resolve vendored dependencies.
+        """
         script_path = os.path.join(self.folder, self.manifest.python_script)
+        vendor_path = os.path.join(self.folder, 'lib') # Standardized library folder
         self.log.verbose(f"Attempting to load Python backend from: {script_path}")
 
         if not os.path.exists(script_path):
             self.log.error(f"Python script '{self.manifest.python_script}' missing from folder.")
             return
 
+        # Temporarily add the vendored library path to sys.path
+        if os.path.isdir(vendor_path):
+            self.log.verbose(f"Adding vendored library path to sys.path: {vendor_path}")
+            sys.path.insert(0, vendor_path)
+
         try:
             module_name = f"plugin_mod_{self.manifest.name.replace(' ', '_')}"
             spec = importlib.util.spec_from_file_location(module_name, script_path)
+            if spec is None:
+                raise ImportError(f"Could not create module spec for {script_path}")
+                
             module = importlib.util.module_from_spec(spec)
             
-            # This executes the module code
             spec.loader.exec_module(module)
 
             if hasattr(module, 'Main'):
                 self.log.verbose("Found 'Main' class. Instantiating with config...")
                 config_dict = {p.name: p.value for p in self.manifest.config}
-                self.python_instance = module.Main(config_dict, get_logger(f'plugin.{self.manifest.name.replace(' ', '_')}'))
+                self.python_instance = module.Main(config_dict, get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}'))
             else:
                 self.log.verbose("No 'Main' class found. Using raw module export.")
                 self.python_instance = module
@@ -159,6 +143,11 @@ class Plugin:
             self.log.success("Python backend initialized successfully.")
         except Exception as e:
             self.log.error(f"Failed to load Python module: {e}")
+        finally:
+            # IMPORTANT: Clean up sys.path to avoid conflicts with other plugins
+            if os.path.isdir(vendor_path) and vendor_path in sys.path:
+                self.log.verbose(f"Removing vendored library path from sys.path: {vendor_path}")
+                sys.path.remove(vendor_path)
 
     def _read_file(self, filename: str) -> str:
         path = os.path.join(self.folder, filename)
