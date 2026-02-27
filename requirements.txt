@@ -1,4 +1,6 @@
-pywebview
-ordered-set
-zstandard
+beautifulsoup4
 pydantic
+pywebview
+Requests
+rich
+verboselogs
