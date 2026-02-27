@@ -35,47 +35,43 @@ jobs:
       - name: Install Build Dependencies
         run: |
           pip install -r requirements.txt
-          pip install nuitka pydantic zstandard 
+          pip install nuitka pydantic zstandard
 
       - name: Install OS Specific Dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          # Try to install 4.1 (Ubuntu 24.04) first, then 4.0 (Ubuntu 22.04)
           sudo apt-get install -y libgtk-3-dev python3-dev build-essential \
             libwebkit2gtk-4.1-dev || sudo apt-get install -y libwebkit2gtk-4.0-dev
 
-      - name: Build with Nuitka (via build.py)
-        shell: bash
-        run: |
-          # We run your custom build script so it detects plugin manifests 
-          # and adds --include-package flags automatically
-          python build.py
+      - name: Build with Nuitka
+        run: python build.py
 
       - name: Prepare Release Folder
         shell: bash
         run: |
           mkdir release_dir
           mkdir release_dir/plugins
-          # Check if the file exists before copying to prevent silent failure
           if [ -f "${{ matrix.executable_name }}" ]; then
             cp "${{ matrix.executable_name }}" release_dir/
           else
             echo "Error: Binary ${{ matrix.executable_name }} not found!"
             exit 1
           fi
-          echo "Place your plugins folder contents here" > release_dir/plugins/README.txt
-          
+          echo "Place your plugins here" > release_dir/plugins/README.txt
+
       - name: Zip Release
         uses: thedoctor0/zip-release@0.7.6
         with:
           type: 'zip'
-          filename: ${{ matrix.asset_name }}
+          # We tell it to name the file in the parent directory (root)
+          filename: '../${{ matrix.asset_name }}' 
           directory: 'release_dir'
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
+          # Now it will find the file in the root
           files: ${{ matrix.asset_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
