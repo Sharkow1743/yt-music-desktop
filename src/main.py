@@ -1,47 +1,40 @@
-import platform
-import webview
 import os
-
 from logger import get_logger
+import webview
 from plugin import PluginManager
 
 logger = get_logger('main')
 
 def main():
-    manager = PluginManager()
-    
     data_dir = os.path.join(os.getcwd(), 'ytm_data')
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
-    # 1. Load plugins before starting the window
+    w = webview.webview.Webview(debug=True, size=webview.Size(800, 600, webview.SizeHint.MIN))
+    w.title = "YouTube Music"
+    w.navigate("https://music.youtube.com")
+
+    manager = PluginManager(w)
+
     manager.load_plugins()
 
-    window = webview.create_window(
-        'YouTube Music', 
-        'https://music.youtube.com',
-        width=1200, height=800,
-        min_size=(800, 600),
-        js_api=manager.get_combined_api()
-    )
+    def on_dom_ready():
+        logger.info("DOM Ready signal received. Injecting plugins...")
+        manager.inject_plugins()
 
-    def on_page_finished():
-        manager.inject_plugins(window)
+    w.bind("python_init_ready", on_dom_ready)
 
-    window.events.loaded += on_page_finished
+    w.eval("""
+        (function() {
+            const check = () => {
+                if (document.body) { window.python_init_ready(); }
+                else { setTimeout(check, 100); }
+            };
+            check();
+        })();
+    """)
 
-    gui_engine = os.getenv('gui_engine', None)
-    if not gui_engine:
-        match platform.system():
-            case 'Windows':
-                gui_engine='edgechromium'
-
-    webview.start(
-        private_mode=False, 
-        storage_path=data_dir,
-        debug=True,
-        gui=gui_engine
-    )
+    w.run()
 
 if __name__ == '__main__':
     main()

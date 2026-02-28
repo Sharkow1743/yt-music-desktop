@@ -1,20 +1,6 @@
 (function () {
-    const PLUGIN_NAME = 'SyncedLyrics';
-    const G_CONFIG = window.pluginConfig[PLUGIN_NAME] || {};
-
-    /**
-     * -----------------------------------------------------------------------------
-     * Global Callback Receiver
-     * Handles asynchronous calls from the Python backend.
-     * -----------------------------------------------------------------------------
-     */
-    window.sl_callbacks = window.sl_callbacks || {};
-    window.sl_python_callback = function (cb_id, data) {
-        if (window.sl_callbacks[cb_id]) {
-            window.sl_callbacks[cb_id](data);
-            delete window.sl_callbacks[cb_id];
-        }
-    };
+    const PLUGIN_NAME = 'Synced_Lyrics';
+    const G_CONFIG = window.pluginConfig ? (window.pluginConfig[PLUGIN_NAME] || {}) : {};
 
     /**
      * @class SyncedLyricsPlugin
@@ -31,6 +17,7 @@
                 offset: 0,
                 line_effect: 'default',
                 show_time_codes: false,
+                debug: true, // Toggle for verbose logging
                 ...config
             };
 
@@ -50,50 +37,73 @@
                 ytmusicApp: null
             };
 
-            this.fetchSequence = 0; // Prevents race conditions
+            this.fetchSequence = 0; 
             
-            // Bind methods to ensure 'this' context is correct
             this._syncLoop = this._syncLoop.bind(this);
             this._handleTrackChange = this._handleTrackChange.bind(this);
+            
+            this._log("Plugin instance created.");
+        }
+
+        /**
+         * Internal logging helper
+         */
+        _log(msg, data = '', level = 'log') {
+            const prefix = `[Synced Lyrics]`;
+            if (level === 'error') {
+                console.error(prefix, msg, data);
+            } else if (level === 'warn') {
+                console.warn(prefix, msg, data);
+            } else if (this.config.debug) {
+                console.log(prefix, msg, data);
+            }
         }
 
         /**
          * Initializes the plugin, sets up observers and starts the loops.
          */
         init() {
-            if (!this.config.enabled) return;
+            if (!this.config.enabled) {
+                this._log("Plugin is disabled in config.");
+                return;
+            }
 
-            console.log("Synced Lyrics Initializing...");
+            this._log("Initializing...");
 
             this._setupObservers();
             requestAnimationFrame(this._syncLoop);
             
-            // Allow the lyrics tab to be clicked
-            window.addEventListener('sl-unblock', this._unblockLyricsTab);
+            window.addEventListener('sl-unblock', () => {
+                this._log("Received sl-unblock event");
+                this._unblockLyricsTab();
+            });
+            
             this._unlockTabs();
         }
 
         /**
          * Sets up MutationObservers to react to DOM and URL changes.
-         * This is more efficient than a setInterval poll.
          */
         _setupObservers() {
+            this._log("Setting up MutationObservers...");
             const observer = new MutationObserver(() => {
-                // 1. Detect Video ID change for new track
+                // 1. Detect Video ID change
                 const currentVideoId = new URLSearchParams(window.location.search).get('v');
                 if (currentVideoId && currentVideoId !== this.state.videoId) {
+                    this._log(`URL Change detected. New ID: ${currentVideoId}`);
                     this._handleTrackChange(currentVideoId);
                 }
                 
-                // 2. Check if our container needs to be re-rendered
+                // 2. Check if container needs re-render
                 this.dom.parent = document.querySelector('ytmusic-tab-renderer');
                 if (this.dom.parent && !document.getElementById('sl-container')) {
                      if (this.state.lyrics || this.state.isFetching) {
+                        this._log("Lyrics container missing from DOM, re-rendering...");
                         this.render();
                     }
                 }
 
-                this._unlockTabs()
+                this._unlockTabs();
             });
 
             observer.observe(document.body, { childList: true, subtree: true });
@@ -101,27 +111,28 @@
         
         /**
          * Handles the logic for a new song.
-         * @param {string} videoId The new YouTube video ID.
          */
         _handleTrackChange(videoId) {
             const oldTitle = navigator.mediaSession?.metadata?.title;
+            this._log(`Handling track change: ${oldTitle || 'Unknown'} -> (waiting for metadata)`);
+            
             this.state.videoId = videoId;
             this.state.activeIdx = -1;
             this.state.lyrics = null;
-            this.render(); // Show loader/clear old lyrics immediately
+            this.render(); 
 
-            // Polling function to wait for metadata to flip
             let attempts = 0;
             const checkMetadata = setInterval(() => {
                 const currentTitle = navigator.mediaSession?.metadata?.title;
+                const currentArtist = navigator.mediaSession?.metadata?.artist;
                 attempts++;
 
-                // If title changed OR we've waited too long (3s)
                 if ((currentTitle && currentTitle !== oldTitle) || attempts > 15) {
                     clearInterval(checkMetadata);
+                    this._log(`Metadata stabilized after ${attempts} attempts: "${currentTitle}" by ${currentArtist}`);
                     this.fetchData();
                 }
-            }, 200); // Check every 200ms
+            }, 200);
         }
 
         /**
@@ -132,67 +143,49 @@
 
             const title = navigator.mediaSession?.metadata?.title;
             const artist = navigator.mediaSession?.metadata?.artist;
-            if (!title || !artist) return; // Metadata not ready
+            const album = navigator.mediaSession?.metadata?.album || "";
 
-            const currentSeq = ++this.fetchSequence;
+            if (!title || !artist) {
+                this._log("Missing Title or Artist metadata. Aborting fetch.", {title, artist}, 'warn');
+                return;
+            }
+
+            this._log(`Fetching lyrics for: ${title} - ${artist}...`);
             this.state.isFetching = true;
-            
-            this.render(); // Show loader
+            this.render();
 
             try {
-                let result = null;
-                result = await this._fetchFromBackend(title, artist);
+                // Call the python backend via pywebview
+                const result = await window.Synced_Lyrics_fetch_lyrics(
+                    title, 
+                    artist, 
+                    album, 
+                    this.dom.video?.duration || 0, 
+                    this.state.videoId
+                );
 
-                // Fallback to Python backend if YTMusic fails or another provider is chosen
-                if (!result) {
-                    result = await this._fetchYTMusicLyrics(title, artist);
+                if (result && !result.error) {
+                    const typeStr = result.type === 0 ? 'Plain' : (result.type === 2 ? 'Rich/Word' : 'Line-synced');
+                    this._log(`Successfully fetched ${typeStr} lyrics from ${result.provider || 'Backend'}`);
+                    this.state.lyrics = result;
+                } else {
+                    this._log(`Backend returned no lyrics or error for ${title}`, result?.error, 'warn');
+                    this.state.lyrics = null;
                 }
-
-                // Discard result if a newer fetch request has started
-                if (this.fetchSequence !== currentSeq) return;
-                
-                this.state.lyrics = result && result.error ? null : result;
-
             } catch (e) {
-                console.error("Synced Lyrics: Fetch failed.", e);
+                this._log("Critical error during fetch invocation:", e, 'error');
                 this.state.lyrics = null;
             } finally {
-                if (this.fetchSequence === currentSeq) {
-                    this.state.isFetching = false;
-                    this.render();
-                }
+                this.state.isFetching = false;
+                this.render();
             }
-        }
-
-        /**
-         * Fetches lyrics from the Python backend via pywebview.
-         * @param {string} title
-         * @param {string} artist
-         * @returns {Promise<object|null>}
-         */
-        _fetchFromBackend(title, artist) {
-            if (!window.pywebview?.api?.Synced_Lyrics) {
-                 console.warn("Synced Lyrics: Python backend not available.");
-                 return Promise.resolve(null);
-            }
-           
-            const album = navigator.mediaSession?.metadata?.album || "";
-            const duration = this.dom.video?.duration || 0;
-
-            return new Promise(resolve => {
-                const cb_id = Math.random().toString(36).substring(2);
-                window.sl_callbacks[cb_id] = resolve;
-                window.pywebview.api.Synced_Lyrics.fetch_async(
-                    title, artist, album, duration, this.state.videoId, cb_id
-                );
-            });
         }
         
         /**
-         * Fetches lyrics using the internal YTMusic frontend API.
-         * @returns {Promise<object|null>}
+         * Internal YTMusic scraper fallback (Alternative source)
          */
         async _fetchYTMusicLyrics() {
+            this._log("Attempting internal YTMusic API fetch fallback...");
             try {
                 this.dom.ytmusicApp = this.dom.ytmusicApp || document.querySelector('ytmusic-app');
                 const networkManager = this.dom.ytmusicApp?.networkManager;
@@ -208,45 +201,47 @@
                 const browseId = lyricsTab.tabRenderer.endpoint.browseEndpoint.browseId;
                 const browseData = await networkManager.fetch('/browse?prettyPrint=false', { browseId });
 
-                // Process Synced Lyrics
                 const timedLyrics = browseData?.contents?.elementRenderer?.newElement?.type?.componentType?.model?.timedLyricsModel?.lyricsData?.timedLyricsData;
                 if (timedLyrics) {
+                    this._log("Found synced lyrics in YTMusic response");
                     const lines = timedLyrics.map(line => ({
                         time: Number.parseInt(line.cueRange.startTimeMilliseconds),
-                        text: !Number.isNaN(line.lyricLine)
+                        text: line.lyricLine
                     })).sort((a, b) => a.time - b.time);
-                    return { type: 'synced', lyrics: lines, provider: 'YTMusic' };
+                    return { type: 1, lyrics: lines, provider: 'YTMusic' };
                 }
 
-                // Process Plain Lyrics
                 const section = browseData?.contents?.sectionListRenderer?.contents?.[0]?.musicDescriptionShelfRenderer;
                 const text = section?.description?.runs?.map(r => r.text).join('');
-                if (text) return { type: 'plain', lyrics: text, provider: 'YTMusic' };
+                if (text) {
+                    this._log("Found plain lyrics in YTMusic response");
+                    return { type: 0, lyrics: text, provider: 'YTMusic' };
+                }
 
             } catch (e) {
-                console.warn("Synced Lyrics: YTMusic fetch failed:", e);
+                this._log("YTMusic internal fetch failed", e, 'warn');
             }
             return null;
         }
 
         /**
-         * Main render function. Hides original content and renders the lyrics container.
+         * Main render function.
          */
         render() {
             this.dom.parent = this.dom.parent || document.querySelector('ytmusic-tab-renderer');
-            if (!this.dom.parent) return;
+            if (!this.dom.parent) {
+                this._log("Render failed: parent 'ytmusic-tab-renderer' not found", '', 'warn');
+                return;
+            }
 
             this._renderContainer();
-            this._updateHeader();
             this._renderContent();
         }
         
-        /**
-         * Creates the main plugin container and header if they don't exist.
-         */
         _renderContainer() {
             if (document.getElementById('sl-container')) return;
 
+            this._log("Creating container DOM elements");
             this.dom.container = document.createElement('div');
             this.dom.container.id = 'sl-container';
             this.dom.container.className = `sl-theme-${this.config.line_effect}`;
@@ -258,19 +253,6 @@
             this.dom.parent.appendChild(this.dom.container);
         }
 
-        /**
-         * Updates the active class on provider buttons.
-         */
-        _updateHeader() {
-            if (!this.dom.header) return;
-            Array.from(this.dom.header.children).forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.p === this.state.provider);
-            });
-        }
-        
-        /**
-         * Renders the content area based on the current state (loading, not found, or lyrics).
-         */
         _renderContent() {
             this.dom.content = this.dom.content || document.getElementById('sl-content');
             if (!this.dom.content) return;
@@ -284,18 +266,15 @@
             }
         }
         
-        /**
-         * Renders the actual lyrics, either plain or synced.
-         */
         _renderLyrics() {
-            const currentHash = this.state.videoId + this.state.lyrics.provider;
+            const currentHash = this.state.videoId + (this.state.lyrics.provider || 'unknown');
             if (this.dom.content.dataset.hash === currentHash) return;
 
+            this._log(`Rendering lyrics list. Type: ${this.state.lyrics.type}`);
             this.dom.content.innerHTML = '';
             this.dom.content.dataset.hash = currentHash;
             this.state.activeIdx = -1;
             
-            // Type 0: Plain
             if (this.state.lyrics.type === 0) {
                 const txt = document.createElement('div');
                 txt.className = 'sl-plain-text';
@@ -304,19 +283,15 @@
                 return;
             } 
             
-            // Type 1 (Line) & Type 2 (Word)
-            // Both use the same structure, Type 2 has 'parts'
             this.state.lyrics.lyrics.forEach((line, idx) => {
                 const row = document.createElement('div');
                 row.className = 'sl-line';
                 row.dataset.idx = idx;
                 
-                // Optional timestamp display
                 if (this.config.show_time_codes) {
                     row.innerHTML += `<span class="sl-ts">[${(line.time / 1000).toFixed(2)}]</span>`;
                 }
 
-                // If parts exist (Type 2), render words. Otherwise render full line.
                 const hasParts = line.parts && line.parts.length > 0;
                 
                 if (hasParts) {
@@ -326,12 +301,9 @@
                     line.parts.forEach(part => {
                         const wordSpan = document.createElement('span');
                         wordSpan.className = 'sl-word';
-                        wordSpan.innerText = part.text + (part.text.endsWith(' ') ? '' : ' '); // Ensure spacing
-                        
-                        // Metadata for CSS filling effect
+                        wordSpan.innerText = part.text + (part.text.endsWith(' ') ? '' : ' ');
                         wordSpan.dataset.start = part.time;
                         wordSpan.dataset.duration = part.duration;
-                        
                         lineContent.appendChild(wordSpan);
                     });
                     row.appendChild(lineContent);
@@ -343,13 +315,12 @@
                 }
 
                 row.onclick = () => {
+                    this._log(`User seeking to: ${line.time}ms`);
                     this.dom.video = this.dom.video || document.querySelector('video');
                     if (this.dom.video) this.dom.video.currentTime = (line.time / 1000);
                 };
                 this.dom.content.appendChild(row);
             });
-
-            this._injectCSS();
         }
 
 
@@ -357,8 +328,7 @@
          * The main loop for synchronizing lyrics with video playback.
          */
          _syncLoop() {
-            // Check if synced types (1 or 2)
-            if (this.state.lyrics?.type === 0 || !this.state.lyrics) {
+            if (this.state.lyrics?.type === 0 || !this.state.lyrics || this.state.isFetching) {
                 requestAnimationFrame(this._syncLoop);
                 return;
             }
@@ -378,6 +348,7 @@
             else newActiveIdx -= 1;
             
             if (newActiveIdx !== this.state.activeIdx) {
+                this._log(`Sync: Line change [${this.state.activeIdx} -> ${newActiveIdx}]`);
                 this.state.activeIdx = newActiveIdx;
                 const rows = this.dom.content.querySelectorAll('.sl-line');
                 
@@ -390,7 +361,7 @@
                 });
             }
 
-            // 2. Handle Word Highlighting (If Type 2)
+            // 2. Handle Word Highlighting (Type 2 / Karaoke)
             if (this.state.lyrics.type === 2 && this.state.activeIdx !== -1) {
                 const activeRow = this.dom.content.children[this.state.activeIdx];
                 if (activeRow) {
@@ -402,17 +373,15 @@
 
                         if (currentTimeMs >= end) {
                             word.classList.add('passed');
-                            word.style.backgroundPosition = '0 0'; // Fully active color
+                            word.style.backgroundPosition = '0 0';
                         } else if (currentTimeMs >= start) {
-                            // Calculating percentage for karaoke fill
                             const progress = ((currentTimeMs - start) / duration) * 100;
-                            // 100% pos is empty, 0% pos is full. 
                             const bgPos = 100 - progress; 
                             word.style.backgroundPosition = `${bgPos}% 0`;
                             word.classList.remove('passed');
                         } else {
                             word.classList.remove('passed');
-                            word.style.backgroundPosition = '100% 0'; // Fully inactive color
+                            word.style.backgroundPosition = '100% 0';
                         }
                     });
                 }
@@ -424,33 +393,32 @@
         // --- DOM Helpers ---
         _unlockTabs() {
             const tabs = document.querySelectorAll('#tabsContent tp-yt-paper-tab'); 
-            if (!tabs) return;
-            tabs.forEach((tab, idx) => {
-                tab.removeAttribute('disabled');
-                tab.setAttribute('aria-disabled', 'false');
-                tab.disabled = false;
-                tab.style.pointerEvents = 'auto';
-                tab.style.cursor = 'pointer';
-                tab.style.opacity = '1';
-            })
+            if (!tabs || tabs.length === 0) return;
+            
+            tabs.forEach((tab) => {
+                if (tab.hasAttribute('disabled')) {
+                    this._log("Unlocking disabled UI tabs");
+                    tab.removeAttribute('disabled');
+                    tab.setAttribute('aria-disabled', 'false');
+                    tab.disabled = false;
+                    tab.style.pointerEvents = 'auto';
+                    tab.style.cursor = 'pointer';
+                    tab.style.opacity = '1';
+                }
+            });
         };
     }
 
     /**
-     * -----------------------------------------------------------------------------
-     *  Plugin Entry Point
-     *  Waits for the pywebview backend to be ready, then inits the plugin.
-     * -----------------------------------------------------------------------------
+     * Plugin Entry Point
      */
     function main() {
+        console.log("[Synced Lyrics] Script loaded. Checking for dependencies...");
         const plugin = new SyncedLyricsPlugin(G_CONFIG);
         plugin.init();
     }
     
-    if (window.pywebview) {
-        main();
-    } else {
-        window.addEventListener('pywebviewready', main);
-    }
+    // Slight delay to ensure host environment (pywebview) is injected
+    setTimeout(main, 500);
 
 })();

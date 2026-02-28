@@ -8,6 +8,9 @@ import threading
 import base64
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
+import asyncio
+
+import webview
 
 LYRIC_TYPE_PLAIN = 0
 LYRIC_TYPE_SYNCED = 1
@@ -411,10 +414,10 @@ class GeniusProvider(BaseLyricsProvider):
 
     
 class Main:
-    def __init__(self, config, logger):
+    def __init__(self, window: webview.webview.Webview, config, logger):
         self.config = config
         self.log = logger
-        self.window = None 
+        self.window = window 
         self.cache = {}
         
         self.providers: dict[str, BaseLyricsProvider] = {
@@ -423,30 +426,22 @@ class Main:
             "MusixMatch": MusixMatchProvider(logger),
         }
 
-    def on_ready(self):
-        self.log.info("System Ready. Unblocking JS.")
-        if self.window:
-            self.window.run_js("window.dispatchEvent(new CustomEvent('sl-unblock'));")
+    async def fetch_lyrics(self, title, artist, album, duration, video_id):
+        self.log.info(f"Starting async fetch for: {title}")
+        
+        # Cache check
+        if video_id in self.cache: 
+            return self.cache[video_id]
 
-    def fetch_async(self, title, artist, album, duration, video_id, callback_id):
-        self.log.info(f"Starting async fetch for ID: {video_id}")
-        def worker():
-            try:
-                res = self._fetch_sync(title, artist, album, duration, video_id)
-            except Exception as e:
-                self.log.critical(f"Async worker crashed: {e}", exc_info=True)
-                res = {"error": "Internal Error"}
-            
-            try:
-                json_str = json.dumps(res)
-                b64_str = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
-                js_code = f"if(window.sl_python_callback) window.sl_python_callback('{callback_id}', JSON.parse(atob('{b64_str}')));"
-                self.window.evaluate_js(js_code)
-                self.log.debug(f"Callback {callback_id} executed successfully.")
-            except Exception as e:
-                self.log.error(f"Failed to trigger JS callback: {e}")
-
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            result = await asyncio.to_thread(self._fetch_sync, title, artist, album, duration, video_id)
+            if result:
+                self.cache[video_id] = result
+                return result
+        except Exception as e:
+            self.log.error(f"Fetch error: {e}")
+        
+        return {"type": -1, "error": "Lyrics not found"}
 
     def _fetch_sync(self, title, artist, album, duration, video_id):
         if not title or not artist:

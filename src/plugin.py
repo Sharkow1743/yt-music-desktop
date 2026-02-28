@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional
 import typing
 import webview
 from pydantic import BaseModel, TypeAdapter, model_validator
-import subprocess
 
 from logger import get_logger
 
@@ -65,12 +64,13 @@ def get_base_path():
     return current_file_dir
 
 class Plugin:
-    def __init__(self, folder: str, manifest_file: str = 'manifest.json'):
+    def __init__(self, window: webview.webview.Webview, folder: str, manifest_file: str = 'manifest.json'):
         self.folder = folder
         self.manifest_file = manifest_file
         self.manifest: ManifestModel = ManifestModel()
         self.python_instance = None
         self._is_loaded = False
+        self.window = window
         
         self.log = get_logger(f"plugin.{os.path.basename(folder)}")
         self.load()
@@ -135,7 +135,7 @@ class Plugin:
             if hasattr(module, 'Main'):
                 self.log.verbose("Found 'Main' class. Instantiating with config...")
                 config_dict = {p.name: p.value for p in self.manifest.config}
-                self.python_instance = module.Main(config_dict, get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}'))
+                self.python_instance = module.Main(self.window, config_dict, get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}'))
             else:
                 self.log.verbose("No 'Main' class found. Using raw module export.")
                 self.python_instance = module
@@ -161,15 +161,15 @@ class Plugin:
             self.log.error(f"Error reading file {filename}: {e}")
         return ""
 
-    def apply(self, window: webview.Window):
+    def apply(self):
         self.log.info(f"Injecting {self.manifest.name}...")
 
         if self.python_instance:
-            self.python_instance.window = window
-            self.log.verbose('Found python inctance. Injected window')
-            
-            # 2. (Optional) Call a lifecycle method if the plugin defines it
-            if hasattr(self.python_instance, 'on_ready'):
+            self.log.verbose('Found python inctance')
+
+            self._bind_python_module()
+
+            if hasattr(self.python_instance, 'on_ready') and callable(self.python_instance.on_ready):
                 try:
                     self.log.verbose(f"Calling on_ready for {self.manifest.name}")
                     self.python_instance.on_ready()
@@ -227,7 +227,7 @@ class Plugin:
         """
         
         # Execute bootstrap
-        window.run_js(bootstrap_js)
+        self.window.eval(bootstrap_js)
 
         # 3. Inject Files
         for file in self.manifest.files:
@@ -240,14 +240,12 @@ class Plugin:
                 # Note: For complex CSS, you might need a small parser here. 
                 # This logic assumes a helper or simple direct injection for the "system" you requested.
                 safe_css = json.dumps(content)
-                window.run_js(f"""
+                self.window.eval(f"""
                     (function() {{
                         const styleTag = document.createElement('style');
                         styleTag.id = 'plugin-style-{self.manifest.name}';
                         styleTag.innerHTML = {safe_css};
                         document.head.appendChild(styleTag);
-                        // Optional: If you want the 'direct apply' system for specific selectors:
-                        // window.enforceStyle('.target-class', {{ 'color': 'red' }});
                     }})();
                 """)
                 
@@ -255,7 +253,7 @@ class Plugin:
                 # Inject JS with no restrictions
                 # Wrapping in a try-catch to ensure one failing file doesn't break the loop
                 safe_js = content # Content is already raw JS
-                window.run_js(f"""
+                self.window.eval(f"""
                     try {{
                         {safe_js}
                     }} catch (e) {{
@@ -265,9 +263,20 @@ class Plugin:
 
         self.log.success(f"Injection complete for {self.manifest.name}")
 
+    def _bind_python_module(self):
+        safe_name = self.manifest.name.replace(" ", "_")
+        for attr_name in dir(self.python_instance):
+            if attr_name.startswith("_"): continue
+            attr = getattr(self.python_instance, attr_name)
+            if callable(attr):
+                bind_name = f"{safe_name}_{attr_name}"
+                self.window.bind(bind_name, attr)
+                self.log.spam(f"Bound: window.{bind_name}")
+
 class PluginManager:
-    def __init__(self):
+    def __init__(self, window: webview.webview.Webview):
         # Locate the /plugins folder relative to this script
+        self.window = window
         self.plugin_base = os.path.join(get_base_path(), 'plugins')
         
         if not os.path.exists(self.plugin_base):
@@ -299,7 +308,7 @@ class PluginManager:
             if not os.path.isdir(item_path):
                 continue
 
-            plugin = Plugin(item_path)
+            plugin = Plugin(self.window, item_path)
             if plugin.is_valid:
                 self.plugins[plugin.manifest.name] = plugin
             else:
@@ -307,26 +316,7 @@ class PluginManager:
         
         self.log.success(f"Total plugins loaded: {len(self.plugins)}")
 
-    def get_combined_api(self):
-        self.log.verbose("Synthesizing combined API for Webview...")
-        class CombinedAPI:
-            pass
-
-        api = CombinedAPI()
-        attached_count = 0
-        
-        for name, plugin in self.plugins.items():
-            if plugin.python_instance:
-                # Replace spaces with underscores for valid JS object property access
-                safe_name = name.replace(" ", "_")
-                setattr(api, safe_name, plugin.python_instance)
-                attached_count += 1
-                self.log.verbose(f"Bound backend: {name} -> pywebview.api.{safe_name}")
-        
-        self.log.info(f"Combined API generated with {attached_count} backends.")
-        return api
-
-    def inject_plugins(self, window: webview.Window):
+    def inject_plugins(self):
         if not self.plugins:
             self.log.verbose("No plugins to inject.")
             return
@@ -334,7 +324,7 @@ class PluginManager:
         self.log.info(f"Starting injection for {len(self.plugins)} plugins...")
         for name, plugin in self.plugins.items():
             try:
-                plugin.apply(window)
+                plugin.apply()
             except Exception as e:
                 self.log.error(f"Failed to inject plugin '{name}': {e}")
         self.log.success("All plugins processed.")
