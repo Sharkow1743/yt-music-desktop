@@ -51,14 +51,12 @@ jobs:
         shell: bash
         run: |
           mkdir release_dir
-          mkdir release_dir/plugins
-          if [ -f "${{ matrix.executable_name }}" ]; then
-            cp "${{ matrix.executable_name }}" release_dir/
-          else
-            echo "Error: Binary ${{ matrix.executable_name }} not found!"
-            exit 1
-          fi
-          echo "Place your plugins here" > release_dir/plugins/README.txt
+          # Copy the compiled binary
+          cp "${{ matrix.executable_name }}" release_dir/
+          # Copy all plugins (including their subdirectories)
+          cp -r plugins release_dir/
+          # (Optional) Remove any unwanted files, like .gitkeep or __pycache__
+          find release_dir/plugins -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
       - name: Zip Release
         uses: thedoctor0/zip-release@0.7.6

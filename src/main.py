@@ -1,6 +1,10 @@
 import webview
 import os
+
+from logger import get_logger
 from plugin import PluginManager
+
+logger = get_logger('main')
 
 def main():
     manager = PluginManager()
