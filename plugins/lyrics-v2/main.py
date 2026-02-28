@@ -8,11 +8,6 @@ import threading
 import base64
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
-import logging
-
-# Fallback logger if none is provided
-logging.basicConfig(level=logging.INFO)
-DEFAULT_LOGGER = logging.getLogger("LyricsModule")
 
 LYRIC_TYPE_PLAIN = 0
 LYRIC_TYPE_SYNCED = 1
@@ -68,7 +63,6 @@ class LyricsParser:
             return lines, LYRIC_TYPE_SYNCED
         except (json.JSONDecodeError, ValueError) as e:
             if logger: logger.warning(f"JSON parsing failed: {e}")
-            pass
         return [], LYRIC_TYPE_PLAIN
 
     @staticmethod
@@ -113,7 +107,7 @@ class LyricsParser:
 
         except Exception as e:
             if logger: logger.warning(f"TTML parsing failed: {e}")
-            pass
+
         
         return lines, (LYRIC_TYPE_WORD_SYNCED if is_word_level else LYRIC_TYPE_SYNCED)
 
@@ -434,11 +428,11 @@ class Main:
         if self.window:
             self.window.run_js("window.dispatchEvent(new CustomEvent('sl-unblock'));")
 
-    def fetch_async(self, title, artist, album, duration, videoId, callback_id):
-        self.log.info(f"Starting async fetch for ID: {videoId}")
+    def fetch_async(self, title, artist, album, duration, video_id, callback_id):
+        self.log.info(f"Starting async fetch for ID: {video_id}")
         def worker():
             try:
-                res = self._fetch_sync(title, artist, album, duration, videoId)
+                res = self._fetch_sync(title, artist, album, duration, video_id)
             except Exception as e:
                 self.log.critical(f"Async worker crashed: {e}", exc_info=True)
                 res = {"error": "Internal Error"}
@@ -454,17 +448,17 @@ class Main:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _fetch_sync(self, title, artist, album, duration, videoId):
+    def _fetch_sync(self, title, artist, album, duration, video_id):
         if not title or not artist:
             self.log.warning("Fetch requested with missing metadata.")
             return {"error": "Missing metadata"}
 
-        cache_key = videoId
+        cache_key = video_id
         if cache_key in self.cache: 
-            self.log.info(f"Cache HIT for {videoId} ({self.cache[cache_key]['provider']})")
+            self.log.info(f"Cache HIT for {video_id} ({self.cache[cache_key]['provider']})")
             return self.cache[cache_key]
 
-        meta = {"title": title, "artist": artist, "album": album, "duration": duration, "videoId": videoId}
+        meta = {"title": title, "artist": artist, "album": album, "duration": duration, "videoId": video_id}
         self.log.info(f"Fetching: '{title}' - '{artist}' (Duration: {duration})")
 
         best_result = None

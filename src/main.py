@@ -1,3 +1,4 @@
+import platform
 import webview
 import os
 
@@ -29,10 +30,17 @@ def main():
 
     window.events.loaded += on_page_finished
 
+    gui_engine = os.getenv('gui_engine', None)
+    if not gui_engine:
+        match platform.system():
+            case 'Windows':
+                gui_engine='edgechromium'
+
     webview.start(
         private_mode=False, 
         storage_path=data_dir,
-        debug=True
+        debug=True,
+        gui=gui_engine
     )
 
 if __name__ == '__main__':
