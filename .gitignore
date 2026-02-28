@@ -211,3 +211,4 @@ ytm_data
 *.build
 *.dist
 *.onefile-build
+nuitka-crash-report.xml

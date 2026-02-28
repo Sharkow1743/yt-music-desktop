@@ -4,3 +4,4 @@ pywebview
 Requests
 rich
 verboselogs
+pythonnet
