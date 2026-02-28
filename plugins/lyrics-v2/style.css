@@ -21,9 +21,13 @@ ytmusic-message-renderer {
     display: none !important;
 }
 
+ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #sl-container {
+    display: none;
+}
+
 /* --- 2. MAIN CONTAINER (Structure) --- */
 #sl-container, #plugin-lyrics-container {
-    display: flex !important;
+    display: flex;
     flex-direction: column;
     height: 100%; /* Changed to vh to ensure it has height */
     width: 100%;

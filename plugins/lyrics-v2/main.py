@@ -1,14 +1,12 @@
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
 import requests
 from bs4 import BeautifulSoup
 import threading
-import base64
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
-import asyncio
 
 import webview
 
@@ -32,6 +30,58 @@ class LyricsParser:
             return int(seconds * 1000)
         except (ValueError, IndexError):
             return 0
+        
+    @staticmethod
+    def parse_richsync(text: str, logger=None) -> Tuple[List[Dict[str, Any]], str]:
+        """Parses the Musixmatch Richsync JSON format."""
+        if logger: logger.debug("Attempting Richsync JSON parsing...")
+        lines = []
+        try:
+            data = json.loads(text)
+            # The richsync format is typically a list of dicts with 'ts' and 'l' keys
+            if not isinstance(data, list) or not all('ts' in d and 'l' in d for d in data):
+                if logger: logger.warning("JSON is not in expected Richsync format.")
+                return [], LYRIC_TYPE_PLAIN
+
+            for line_data in data:
+                line_begin = int(float(line_data.get('ts', 0)) * 1000)
+                line_end = int(float(line_data.get('te', 0)) * 1000)
+                word_data = line_data.get('l', [])
+                
+                parts = []
+                full_text_list = []
+
+                for word in word_data:
+                    # Each 'word' is a dict with 'c' (text) and 'o' (offset)
+                    offset_ms = int(float(word.get('o', 0)) * 1000)
+                    parts.append({
+                        "time": line_begin + offset_ms,
+                        "duration": 0, # Duration will be calculated later
+                        "text": word.get('c', '')
+                    })
+                    full_text_list.append(word.get('c', ''))
+                
+                # Calculate duration for each part
+                for i in range(len(parts) - 1):
+                    parts[i]["duration"] = parts[i+1]["time"] - parts[i]["time"]
+
+                full_text = "".join(full_text_list).strip()
+                if not full_text: continue
+
+                lines.append({
+                    "time": line_begin,
+                    "duration": max(0, line_end - line_begin),
+                    "text": full_text,
+                    "parts": parts if parts else None
+                })
+            
+            if logger: logger.debug(f"Richsync parsing successful. Found {len(lines)} lines.")
+            return lines, LYRIC_TYPE_WORD_SYNCED
+
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            if logger: logger.warning(f"Richsync JSON parsing failed: {e}")
+        
+        return [], LYRIC_TYPE_PLAIN
 
     @staticmethod
     def parse_json_description(text: str, logger=None):
@@ -156,35 +206,41 @@ class LyricsParser:
 
     @classmethod
     def parse(cls, text: str, logger=None):
-        if not text: 
+        if not text:
             if logger: logger.debug("Parser received empty text.")
             return LYRIC_TYPE_PLAIN, []
-        
+
         text = text.strip()
         lines = []
         sync_type = LYRIC_TYPE_PLAIN
 
-        # 1. Detect JSON Custom Format
-        if text.startswith('[{') and '"total"' in text:
-             if logger: logger.debug("Format detected: JSON Description")
-             lines, sync_type = cls.parse_json_description(text, logger)
-        
+        # 1. Detect JSON formats
+        if text.startswith('[{'):
+            # Richsync format check (more specific)
+            if '"ts"' in text and '"te"' in text and '"l"' in text:
+                if logger: logger.debug("Format detected: Richsync JSON")
+                lines, sync_type = cls.parse_richsync(text, logger)
+            # Original JSON Description format check
+            elif '"total"' in text:
+                if logger: logger.debug("Format detected: JSON Description")
+                lines, sync_type = cls.parse_json_description(text, logger)
+
         # 2. Detect TTML/XML
         elif text.startswith('<') or '<?xml' in text[:50]:
             if logger: logger.debug("Format detected: TTML/XML")
             lines, sync_type = cls.parse_ttml(text, logger)
-            
+
         # 3. Detect LRC
         elif '[' in text[:50]:
             if logger: logger.debug("Format detected: LRC")
             lines, sync_type = cls.parse_lrc(text, logger)
-            
+
         else:
             if logger: logger.debug("Format detected: Plain Text (Fallback)")
             return LYRIC_TYPE_PLAIN, text
 
         # If parsing failed or returned empty
-        if not lines: 
+        if not lines:
             if logger: logger.warning("Parser matched a format but failed to extract lines. Returning Plain.")
             return LYRIC_TYPE_PLAIN, text
 
@@ -192,12 +248,14 @@ class LyricsParser:
         if logger: logger.debug(f"Post-processing {len(lines)} lines (Sorting & Duration calc).")
         lines.sort(key=lambda x: x["time"])
         for i in range(len(lines)):
+            # Calculate line duration
             if lines[i]["duration"] <= 0:
                 if i < len(lines) - 1:
                     lines[i]["duration"] = lines[i+1]["time"] - lines[i]["time"]
                 else:
-                    lines[i]["duration"] = 5000 
-            
+                    lines[i]["duration"] = 5000  # Default duration for the last line
+
+            # Calculate final word duration in a line
             if lines[i]["parts"]:
                 last_p = lines[i]["parts"][-1]
                 if last_p["duration"] <= 0:
@@ -317,10 +375,17 @@ class MusixMatchProvider(BaseLyricsProvider):
                 return None
 
         params = {
-            'app_id': self.app_id, 'usertoken': self.token, 'q_track': title,
-            'q_artist': artist, 'q_duration': duration, 'namespace': 'lyrics_richsynched',
-            'subtitle_format': 'DFXP', 'format': 'json' # Request JSON for easier parsing
+            'app_id': self.app_id, 
+            'usertoken': self.token, 
+            'q_track': title,
+            'q_artist': artist, 
+            'q_duration': duration, 
+            'namespace': 'lyrics_richsynched',
+            'subtitle_format': 'mxm',  # Changed from DFXP to mxm
+            'format': 'json',
+            'optional_calls': 'track.richsync'  # Added to request word-by-word data
         }
+
 
         r = self.session.get(f"{self.base_url}macro.subtitles.get", params=params, timeout=7)
         if r.status_code != 200:
@@ -419,6 +484,7 @@ class Main:
         self.log = logger
         self.window = window 
         self.cache = {}
+        self._async_results = {}
         
         self.providers: dict[str, BaseLyricsProvider] = {
             "LRCLib": LRCLibProvider(logger),
@@ -426,22 +492,45 @@ class Main:
             "MusixMatch": MusixMatchProvider(logger),
         }
 
-    async def fetch_lyrics(self, title, artist, album, duration, video_id):
-        self.log.info(f"Starting async fetch for: {title}")
+    def start_fetch_lyrics(self, title, artist, album, duration, video_id):
+        self.log.info(f"Starting background fetch for: {title}")
         
-        # Cache check
-        if video_id in self.cache: 
-            return self.cache[video_id]
+        # Prevent memory leak if the user skips songs really quickly
+        if len(self._async_results) > 10:
+            self._async_results.clear()
+            
+        # Run your heavy synchronous code in a background thread
+        thread = threading.Thread(
+            target=self._background_worker,
+            args=(title, artist, album, duration, video_id),
+            daemon=True
+        )
+        thread.start()
+        
+        # Return instantly so the JS/UI thread does not freeze
+        return {"status": "started"}
 
+    def _background_worker(self, title, artist, album, duration, video_id):
         try:
-            result = await asyncio.to_thread(self._fetch_sync, title, artist, album, duration, video_id)
-            if result:
-                self.cache[video_id] = result
-                return result
+            # Call your existing blocking function
+            result = self._fetch_sync(title, artist, album, duration, video_id)
         except Exception as e:
             self.log.error(f"Fetch error: {e}")
+            result = {"type": -1, "error": str(e) or "Lyrics not found"}
+            
+        if not result:
+            result = {"type": -1, "error": "Lyrics not found"}
+            
+        # Store result in the dict. Dictionary assignment is thread-safe in Python.
+        self._async_results[video_id] = result
+
+    def check_lyrics_result(self, video_id):
+        # Fast, non-blocking check called periodically by JS
+        if video_id in self._async_results:
+            return self._async_results.pop(video_id) # Return and remove
         
-        return {"type": -1, "error": "Lyrics not found"}
+        return {"status": "pending"}
+
 
     def _fetch_sync(self, title, artist, album, duration, video_id):
         if not title or not artist:

@@ -138,7 +138,7 @@
         /**
          * Main data fetching orchestration.
          */
-        async fetchData() {
+async fetchData() {
             if (!this.state.videoId) return;
 
             const title = navigator.mediaSession?.metadata?.title;
@@ -146,39 +146,106 @@
             const album = navigator.mediaSession?.metadata?.album || "";
 
             if (!title || !artist) {
-                this._log("Missing Title or Artist metadata. Aborting fetch.", {title, artist}, 'warn');
+                this._log("Missing Metadata.", {title, artist}, 'warn');
                 return;
             }
 
-            this._log(`Fetching lyrics for: ${title} - ${artist}...`);
-            this.state.isFetching = true;
-            this.render();
+            // --- CRITICAL FIX 1: Reset state for new song ---
+            this.state.lyrics = null;     // Clear old lyrics
+            this.state.isFetching = true; // Mark as loading
+            this.render();                // Show loading spinner/message
 
             try {
-                // Call the python backend via pywebview
-                const result = await window.Synced_Lyrics_fetch_lyrics(
-                    title, 
-                    artist, 
-                    album, 
+                // Start the background process
+                await window.Synced_Lyrics_start_fetch_lyrics(
+                    title, artist, album, 
                     this.dom.video?.duration || 0, 
                     this.state.videoId
                 );
 
-                if (result && !result.error) {
-                    const typeStr = result.type === 0 ? 'Plain' : (result.type === 2 ? 'Rich/Word' : 'Line-synced');
-                    this._log(`Successfully fetched ${typeStr} lyrics from ${result.provider || 'Backend'}`);
-                    this.state.lyrics = result;
-                } else {
-                    this._log(`Backend returned no lyrics or error for ${title}`, result?.error, 'warn');
-                    this.state.lyrics = null;
-                }
+                // Start polling (isFetching remains true during polling)
+                this._pollLyricsResult(this.state.videoId, title);
+
             } catch (e) {
-                this._log("Critical error during fetch invocation:", e, 'error');
-                this.state.lyrics = null;
-            } finally {
+                this._log("Fetch invocation error:", e, 'error');
                 this.state.isFetching = false;
                 this.render();
             }
+            // Note: No 'finally' block here, because the process isn't done yet!
+        }
+
+        async _pollLyricsResult(videoId, title) {
+            const pollInterval = 500;
+
+            const check = async () => {
+                // If song changed during polling, stop this poll
+                if (this.state.videoId !== videoId) return;
+
+                try {
+                    const result = await window.Synced_Lyrics_check_lyrics_result(videoId);
+
+                    if (result && result.status === "pending") {
+                        setTimeout(check, pollInterval);
+                        return;
+                    }
+
+                    // --- CRITICAL FIX 2: Data has arrived ---
+                    if (result && !result.error) {
+                        this.state.lyrics = result;
+                    } else {
+                        this._log(`No lyrics for ${title}`, result?.error, 'warn');
+                        this.state.lyrics = null;
+                    }
+                } catch (e) {
+                    this._log("Polling error:", e, 'error');
+                } finally {
+                    // --- CRITICAL FIX 3: Only stop loading state NOW ---
+                    this.state.isFetching = false;
+                    this.render(); 
+                }
+            };
+
+            setTimeout(check, pollInterval);
+        }
+
+        // New Polling logic
+        async _pollLyricsResult(videoId, title) {
+            const pollInterval = 500; // Check every 500ms
+
+            const check = async () => {
+                // Important: If the user changed the track while we were waiting, abort cleanly!
+                if (this.state.videoId !== videoId) return;
+
+                try {
+                    // Call the fast, non-blocking check function
+                    const result = await window.Synced_Lyrics_check_lyrics_result(videoId);
+
+                    if (result?.status === "pending") {
+                        // Not ready yet, check again in 500ms
+                        setTimeout(check, pollInterval);
+                        return;
+                    }
+
+                    // We got the final result!
+                    if (result && !result.error) {
+                        const typeStr = result.type === 0 ? 'Plain' : (result.type === 2 ? 'Rich/Word' : 'Line-synced');
+                        this._log(`Successfully fetched ${typeStr} lyrics from ${result.provider || 'Backend'}`);
+                        this.state.lyrics = result;
+                    } else {
+                        this._log(`Backend returned no lyrics or error for ${title}`, result?.error, 'warn');
+                        this.state.lyrics = null;
+                    }
+                } catch (e) {
+                    this._log("Critical error during fetch polling:", e, 'error');
+                    this.state.lyrics = null;
+                } finally {
+                    this.state.isFetching = false;
+                    this.render();
+                }
+            };
+
+            // Start the loop
+            setTimeout(check, pollInterval);
         }
         
         /**
@@ -233,6 +300,8 @@
                 this._log("Render failed: parent 'ytmusic-tab-renderer' not found", '', 'warn');
                 return;
             }
+
+            if (this.dom.parent.getAttribute('page-type') !== 'MUSIC_PAGE_TYPE_TRACK_LYRICS') { return }
 
             this._renderContainer();
             this._renderContent();
