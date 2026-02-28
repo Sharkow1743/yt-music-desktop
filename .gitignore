@@ -212,3 +212,5 @@ ytm_data
 *.dist
 *.onefile-build
 nuitka-crash-report.xml
+yt_music.exe
+yt_music.pdb
