@@ -104,12 +104,24 @@
          * @param {string} videoId The new YouTube video ID.
          */
         _handleTrackChange(videoId) {
+            const oldTitle = navigator.mediaSession?.metadata?.title;
             this.state.videoId = videoId;
             this.state.activeIdx = -1;
             this.state.lyrics = null;
-            
-            // Delay fetching to allow media metadata to populate
-            setTimeout(() => this.fetchData(), 500);
+            this.render(); // Show loader/clear old lyrics immediately
+
+            // Polling function to wait for metadata to flip
+            let attempts = 0;
+            const checkMetadata = setInterval(() => {
+                const currentTitle = navigator.mediaSession?.metadata?.title;
+                attempts++;
+
+                // If title changed OR we've waited too long (3s)
+                if ((currentTitle && currentTitle !== oldTitle) || attempts > 15) {
+                    clearInterval(checkMetadata);
+                    this.fetchData();
+                }
+            }, 200); // Check every 200ms
         }
 
         /**
