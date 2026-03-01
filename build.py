@@ -59,7 +59,6 @@ def run_build():
         "--onefile",
         "--windows-console-mode=force", 
         "--include-package-data=webview",
-        "--include-module=webview.platforms.winforms",
         "--assume-yes-for-downloads",
         "--zig",
         "--output-filename=yt_music",
