@@ -69,6 +69,7 @@ def run_build():
         build_command.append(f"--include-package={clean_name}")
 
     standard_libs =[
+        "xml.etree.ElementTree",
         "xml",
         "json", 
         "re", 
