@@ -51,8 +51,8 @@ jobs:
         shell: bash
         run: |
           mkdir release_dir
-          cp "${{ matrix.executable_name }}" release_dir/
-          cp -r plugins release_dir/
+          cp -r main.dist release_dir/
+          cp -r plugins release_dir/plugins/
           find release_dir/plugins -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
           find release_dir -exec touch {} +
 

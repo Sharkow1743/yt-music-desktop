@@ -56,7 +56,6 @@ def run_build():
     build_command = [
         sys.executable, "-m", "nuitka",
         "--standalone",
-        "--onefile",
         "--windows-console-mode=force", 
         "--include-package-data=webview",
         "--assume-yes-for-downloads",
@@ -68,6 +67,17 @@ def run_build():
         # Extract base name (e.g., 'requests==2.0' -> 'requests')
         clean_name = dep.split('==')[0].split('>')[0].split('<')[0]
         build_command.append(f"--include-package={clean_name}")
+
+    standard_libs =[
+        "xml",
+        "json", 
+        "re", 
+        "sqlite3", 
+        "datetime",
+        "threading"
+    ]
+    for lib in standard_libs:
+        build_command.append(f"--include-module={lib}")
 
     build_command.append("src/main.py")
 
