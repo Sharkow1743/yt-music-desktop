@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-import importlib.util
+import types
 from typing import Any, Dict, Optional
 import typing
 import webview
@@ -10,6 +10,8 @@ from pydantic import BaseModel, TypeAdapter, model_validator
 from logger import get_logger
 
 logger = get_logger("plugins")
+
+sys.dont_write_bytecode = True
 
 # --- Models ---
 
@@ -106,11 +108,11 @@ class Plugin:
 
     def _load_python_module(self):
         """
-        Loads the plugin's Python module, temporarily adding its 'lib' 
-        directory to the system path to resolve vendored dependencies.
+        Loads the plugin's Python module using exec() to bypass timestamp/metadata checks.
         """
+        
         script_path = os.path.join(self.folder, self.manifest.python_script)
-        vendor_path = os.path.join(self.folder, 'lib') # Standardized library folder
+        vendor_path = os.path.join(self.folder, 'lib') 
         self.log.verbose(f"Attempting to load Python backend from: {script_path}")
 
         if not os.path.exists(script_path):
@@ -119,19 +121,27 @@ class Plugin:
 
         # Temporarily add the vendored library path to sys.path
         if os.path.isdir(vendor_path):
-            self.log.verbose(f"Adding vendored library path to sys.path: {vendor_path}")
             sys.path.insert(0, vendor_path)
 
         try:
+            # Generate a unique module name
             module_name = f"plugin_mod_{self.manifest.name.replace(' ', '_')}"
-            spec = importlib.util.spec_from_file_location(module_name, script_path)
-            if spec is None:
-                raise ImportError(f"Could not create module spec for {script_path}")
-                
-            module = importlib.util.module_from_spec(spec)
             
-            spec.loader.exec_module(module)
+            # 1. Read the code as a simple string (ignores file date/metadata)
+            with open(script_path, 'r', encoding='utf-8') as f:
+                source_code = f.read()
 
+            # 2. Create a fresh module object
+            module = types.ModuleType(module_name)
+            module.__file__ = script_path
+            
+            # 3. Add to sys.modules (allows the plugin to import itself if needed)
+            sys.modules[module_name] = module
+
+            # 4. Execute the code directly into the module
+            exec(source_code, module.__dict__)
+
+            # Check for the Main class as before
             if hasattr(module, 'Main'):
                 self.log.verbose("Found 'Main' class. Instantiating with config...")
                 config_dict = {p.name: p.value for p in self.manifest.config}
@@ -144,9 +154,7 @@ class Plugin:
         except Exception as e:
             self.log.error(f"Failed to load Python module: {e}")
         finally:
-            # IMPORTANT: Clean up sys.path to avoid conflicts with other plugins
             if os.path.isdir(vendor_path) and vendor_path in sys.path:
-                self.log.verbose(f"Removing vendored library path from sys.path: {vendor_path}")
                 sys.path.remove(vendor_path)
 
     def _read_file(self, filename: str) -> str:

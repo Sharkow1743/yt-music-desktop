@@ -51,12 +51,10 @@ jobs:
         shell: bash
         run: |
           mkdir release_dir
-          # Copy the compiled binary
           cp "${{ matrix.executable_name }}" release_dir/
-          # Copy all plugins (including their subdirectories)
           cp -r plugins release_dir/
-          # (Optional) Remove any unwanted files, like .gitkeep or __pycache__
           find release_dir/plugins -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          find release_dir -exec touch {} +
 
       - name: Zip Release
         uses: thedoctor0/zip-release@0.7.6
