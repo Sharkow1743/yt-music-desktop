@@ -72,7 +72,6 @@ ytmusic-player-queue-item[play-button-state=loading],
 ytmusic-player-queue-item[play-button-state=playing], 
 ytmusic-player-queue-item[play-button-state=paused] {
     background-color: var(--accent-alpha-10) !important;
-    border-radius: 12px;
 }
 
 /* Progress Bars */
@@ -101,4 +100,8 @@ ytmusic-player-queue-item[play-button-state=paused] {
 
 #mini-guide-background {
     display: none;
+}
+
+#guide-wrapper.ytmusic-app {
+    background-color: transparent !important;
 }

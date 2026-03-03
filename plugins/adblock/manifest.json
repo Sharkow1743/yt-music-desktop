@@ -1,4 +1,4 @@
 {
     "name": "Adblocker",
-    "files": ["adblock.js"]
+    "files": ["adblock.js", "style.css"]
 }
