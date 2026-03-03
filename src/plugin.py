@@ -152,7 +152,7 @@ class Plugin:
             
             self.log.success("Python backend initialized successfully.")
         except Exception as e:
-            self.log.error(f"Failed to load Python module: {e}")
+            self.log.error(f"Failed to load Python module: {e}", exc_info=True)
         finally:
             if os.path.isdir(vendor_path) and vendor_path in sys.path:
                 sys.path.remove(vendor_path)
