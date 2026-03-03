@@ -60,7 +60,6 @@ def run_build():
         "--windows-console-mode=force", 
         "--include-package-data=webview",
         "--assume-yes-for-downloads",
-        "--zig",
         "--output-filename=yt_music",
     ]
 
