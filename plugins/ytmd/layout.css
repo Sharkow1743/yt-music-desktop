@@ -17,7 +17,21 @@
 }
 
 ytmusic-player {
-	max-height: 90% !important;
+    max-height: 90% !important;
+    animation: none !important;
+}
+
+ytmusic-player-page {
+    transition: transform .2s cubic-bezier(.2,0,.6,1) !important;
+}
+
+#live-mesh-bg {
+    opacity: 1;
+    transition: opacity 0.6s cubic-bezier(.2,0,.6,1);
+}
+
+ytmusic-player-page[player-ui-state="MINIPLAYER"] #live-mesh-bg {
+    opacity: 0;
 }
 
 #side-panel {

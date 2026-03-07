@@ -393,6 +393,8 @@ class MusixMatchProvider(BaseLyricsProvider):
             return None
 
         macro_body = r.json().get('message', {}).get('body', {}).get('macro_calls', {})
+
+        if not isinstance(macro_body, list): return None
         
         # Priority 1: Synced Lyrics
         track_subs = macro_body.get('track.subtitles.get', {}).get('message', {}).get('body', {})
