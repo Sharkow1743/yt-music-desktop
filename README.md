@@ -4,6 +4,9 @@ A lightweight desktop client for YouTube Music built with Python and `webview_py
 
 App don`t bundled with web engine: it will use already installed engine 
 
+> [!WARNING]  
+> Not tested on linux
+
 ---
 
 ## For Users
