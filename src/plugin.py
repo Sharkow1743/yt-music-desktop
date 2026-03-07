@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import sys
@@ -163,13 +164,45 @@ class Plugin:
 
             # Check for the Main class as before
             if hasattr(module, 'Main'):
-                self.log.verbose("Found 'Main' class. Instantiating with config...")
+                self.log.verbose("Found 'Main' class. Instantiating with dependency injection...")
+                
+                # 1. Initialize dependencies
                 config_dict = {p.name: p.value for p in self.manifest.config}
-
-                storage_path = os.path.join(self.folder, 'data.db')
+                storage_path = os.path.join(self.folder, 'storage.db')
                 self.storage = PluginStorage(storage_path)
+                logger_instance = get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}')
 
-                self.python_instance = module.Main(self.window, config_dict, get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}'))
+                # 2. Map available dependencies by the exact argument names you expect plugins to use
+                available_dependencies = {
+                    'window': self.window,
+                    'config': config_dict,
+                    'logger': logger_instance,
+                    'storage': self.storage
+                }
+
+                # 3. Inspect the plugin's Main class to see what it wants
+                sig = inspect.signature(module.Main)
+                
+                kwargs_to_pass = {}
+                accepts_kwargs = False
+                
+                for param_name, param in sig.parameters.items():
+                    # If the plugin has **kwargs, it accepts everything
+                    if param.kind == inspect.Parameter.VAR_KEYWORD:
+                        accepts_kwargs = True
+                        break
+                    
+                    # If it asks for a specific dependency we know about, provide it
+                    if param_name in available_dependencies:
+                        kwargs_to_pass[param_name] = available_dependencies[param_name]
+                    else:
+                        self.log.warning(f"Plugin requested unknown argument: '{param_name}'")
+
+                if accepts_kwargs:
+                    kwargs_to_pass = available_dependencies
+
+                # 4. Instantiate with only the requested arguments
+                self.python_instance = module.Main(**kwargs_to_pass)
             else:
                 self.log.verbose("No 'Main' class found. Using raw module export.")
                 self.python_instance = module
