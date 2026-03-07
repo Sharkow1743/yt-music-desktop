@@ -2,10 +2,11 @@ import json
 import os
 import sys
 import types
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 import typing
 import webview
 from pydantic import BaseModel, TypeAdapter, model_validator
+import sqlite3
 
 from logger import get_logger
 
@@ -64,6 +65,25 @@ def get_base_path():
     current_file_dir = os.getcwd()
     
     return current_file_dir
+
+class PluginStorage:
+    def __init__(self, db_path):
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.execute('CREATE TABLE IF NOT EXISTS storage (key TEXT PRIMARY KEY, value TEXT)')
+        self.conn.commit()
+
+    def get(self, key):
+        cur = self.conn.execute('SELECT value FROM storage WHERE key = ?', (key,))
+        row = cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    def set(self, key, value):
+        self.conn.execute('INSERT OR REPLACE INTO storage (key, value) VALUES (?, ?)', (key, json.dumps(value)))
+        self.conn.commit()
+
+    def delete(self, key):
+        self.conn.execute('DELETE FROM storage WHERE key = ?', (key,))
+        self.conn.commit()
 
 class Plugin:
     def __init__(self, window: webview.webview.Webview, folder: str, manifest_file: str = 'manifest.json'):
@@ -145,6 +165,10 @@ class Plugin:
             if hasattr(module, 'Main'):
                 self.log.verbose("Found 'Main' class. Instantiating with config...")
                 config_dict = {p.name: p.value for p in self.manifest.config}
+
+                storage_path = os.path.join(self.folder, 'data.db')
+                self.storage = PluginStorage(storage_path)
+
                 self.python_instance = module.Main(self.window, config_dict, get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}'))
             else:
                 self.log.verbose("No 'Main' class found. Using raw module export.")
