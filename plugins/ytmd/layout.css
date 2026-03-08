@@ -7,8 +7,6 @@
 }
 
 #main-panel {
-	padding: 0 !important;
-    margin: 0 !important;
     max-height: 90% !important;
 	max-width: 35%;
     flex-grow: 2;
