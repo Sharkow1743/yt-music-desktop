@@ -370,9 +370,7 @@ class MusixMatchProvider(BaseLyricsProvider):
     def _fetch_lyrics(self, title: str, artist: str, duration: int) -> Optional[Dict[str, Any]]:
         if not self.token:
             self.token = self._get_token()
-            if not self.token:
-                self.log.warning("[MXM] Aborting search: No token available.")
-                return None
+            if not self.token: return None
 
         params = {
             'app_id': self.app_id, 
@@ -380,35 +378,54 @@ class MusixMatchProvider(BaseLyricsProvider):
             'q_track': title,
             'q_artist': artist, 
             'q_duration': duration, 
-            'namespace': 'lyrics_richsynched',
-            'subtitle_format': 'mxm',  # Changed from DFXP to mxm
+            'subtitle_format': 'mxm',
             'format': 'json',
-            'optional_calls': 'track.richsync'  # Added to request word-by-word data
+            'optional_calls': 'track.richsync,track.subtitle.get,track.lyrics.get'
         }
 
+        try:
+            r = self.session.get(f"{self.base_url}macro.subtitles.get", params=params, timeout=7)
+            if r.status_code != 200: return None
+            
+            # Use safe navigation to get the body
+            json_payload = r.json()
+            message = json_payload.get('message', {})
+            body = message.get('body')
+            macro_calls = body.get('macro_calls', {})
 
-        r = self.session.get(f"{self.base_url}macro.subtitles.get", params=params, timeout=7)
-        if r.status_code != 200:
-            self.log.warning(f"[MXM] API returned {r.status_code}")
-            return None
+            # 1. Try Word-Synced (Richsync)
+            # Note: The key is often 'track.richsync.get'
+            rs_call = macro_calls.get('track.richsync.get', {})
+            if isinstance(rs_call, dict):
+                richsync = rs_call.get('message', {}).get('body', {}).get('richsync', {})
+                if isinstance(richsync, dict):
+                    body_text = richsync.get('richsync_body')
+                    if body_text:
+                        sync_type, parsed = LyricsParser.parse(body_text, self.log)
+                        return {"type": sync_type, "lyrics": parsed}
 
-        macro_body = r.json().get('message', {}).get('body', {}).get('macro_calls', {})
+            # 2. Try Line-Synced (Subtitles)
+            sub_call = macro_calls.get('track.subtitles.get', {})
+            if isinstance(sub_call, dict):
+                subs = sub_call.get('message', {}).get('body', {})
+                if isinstance(subs, dict) and subs.get('subtitle_list'):
+                    body_text = subs['subtitle_list'][0]['subtitle']['subtitle_body']
+                    sync_type, parsed = LyricsParser.parse(body_text, self.log)
+                    return {"type": sync_type, "lyrics": parsed}
 
-        if not isinstance(macro_body, list): return None
-        
-        # Priority 1: Synced Lyrics
-        track_subs = macro_body.get('track.subtitles.get', {}).get('message', {}).get('body', {})
-        if track_subs and track_subs.get('subtitle_list'):
-            body = track_subs['subtitle_list'][0]['subtitle']['subtitle_body']
-            sync_type, parsed = LyricsParser.parse(body, self.log)
-            return {"type": sync_type, "lyrics": parsed}
-
-        # Priority 2: Plain Lyrics
-        track_lyrics = macro_body.get('track.lyrics.get', {}).get('message', {}).get('body', {}).get('lyrics', {})
-        if track_lyrics and track_lyrics.get('lyrics_body'):
-             return {"type": LYRIC_TYPE_PLAIN, "lyrics": track_lyrics['lyrics_body']}
+            # 3. Fallback to Plain Lyrics
+            lyr_call = macro_calls.get('track.lyrics.get', {})
+            if isinstance(lyr_call, dict):
+                lyrics = lyr_call.get('message', {}).get('body', {}).get('lyrics', {})
+                if isinstance(lyrics, dict) and lyrics.get('lyrics_body'):
+                     return {"type": LYRIC_TYPE_PLAIN, "lyrics": lyrics['lyrics_body']}
+        except AttributeError:
+            self.log.warning('[MXM] Api returned unexpected format. Likely it didn`t found lyrics')
+        except Exception as e:
+            self.log.error(f"[MXM] Fetch error: {e}")
         
         return None
+
 
 class LRCLibProvider(BaseLyricsProvider):
     def _fetch_lyrics(self, title: str, artist: str, duration: int) -> Optional[Dict[str, Any]]:
@@ -481,11 +498,11 @@ class GeniusProvider(BaseLyricsProvider):
 
     
 class Main:
-    def __init__(self, window: webview.webview.Webview, config, logger):
+    def __init__(self, window: webview.webview.Webview, config, logger, storage):
         self.config = config
         self.log = logger
         self.window = window 
-        self.cache = {}
+        self.storage = storage
         self._async_results = {}
         
         self.providers: dict[str, BaseLyricsProvider] = {
@@ -494,28 +511,23 @@ class Main:
             "MusixMatch": MusixMatchProvider(logger),
         }
 
-    def start_fetch_lyrics(self, title, artist, album, duration, video_id):
-        self.log.info(f"Starting background fetch for: {title}")
+    def start_fetch_lyrics(self, title, artist, album, duration, video_id, force_provider=None):
+        self.log.info(f"Starting background fetch for: {title} {'(Provider: ' + force_provider + ')' if force_provider else ''}")
         
-        # Prevent memory leak if the user skips songs really quickly
         if len(self._async_results) > 10:
             self._async_results.clear()
             
-        # Run your heavy synchronous code in a background thread
         thread = threading.Thread(
             target=self._background_worker,
-            args=(title, artist, album, duration, video_id),
+            args=(title, artist, album, duration, video_id, force_provider), # Passed force_provider
             daemon=True
         )
         thread.start()
-        
-        # Return instantly so the JS/UI thread does not freeze
         return {"status": "started"}
 
-    def _background_worker(self, title, artist, album, duration, video_id):
+    def _background_worker(self, title, artist, album, duration, video_id, force_provider):
         try:
-            # Call your existing blocking function
-            result = self._fetch_sync(title, artist, album, duration, video_id)
+            result = self._fetch_sync(title, artist, album, duration, video_id, force_provider)
         except Exception as e:
             self.log.error(f"Fetch error: {e}")
             result = {"type": -1, "error": str(e) or "Lyrics not found"}
@@ -523,54 +535,59 @@ class Main:
         if not result:
             result = {"type": -1, "error": "Lyrics not found"}
             
-        # Store result in the dict. Dictionary assignment is thread-safe in Python.
         self._async_results[video_id] = result
 
-    def check_lyrics_result(self, video_id):
-        # Fast, non-blocking check called periodically by JS
-        if video_id in self._async_results:
-            return self._async_results.pop(video_id) # Return and remove
+    def save_edited_lyrics(self, video_id, raw_text):
+        self.log.info(f"Saving edited lyrics for {video_id}")
+        sync_type, parsed = LyricsParser.parse(raw_text, self.log)
+        result = {"type": sync_type, "lyrics": parsed, "provider": "User (Edited)"}
         
+        self.storage.set(video_id, result)
+        self._async_results[video_id] = result
+        return result
+        
+    def check_lyrics_result(self, video_id):
+        if video_id in self._async_results:
+            return self._async_results.pop(video_id) 
         return {"status": "pending"}
 
-
-    def _fetch_sync(self, title, artist, album, duration, video_id):
-        if not title or not artist:
-            self.log.warning("Fetch requested with missing metadata.")
-            return {"error": "Missing metadata"}
+    def _fetch_sync(self, title, artist, album, duration, video_id, force_provider):
+        if not title or not artist: 
+            return {"type": -1, "error": "Missing metadata"}
 
         cache_key = video_id
-        if cache_key in self.cache: 
-            self.log.info(f"Cache HIT for {video_id} ({self.cache[cache_key]['provider']})")
-            return self.cache[cache_key]
+        if not force_provider:
+            cached_result = self.storage.get(cache_key)
+            if cached_result: 
+                return cached_result
 
         meta = {"title": title, "artist": artist, "album": album, "duration": duration, "videoId": video_id}
-        self.log.info(f"Fetching: '{title}' - '{artist}' (Duration: {duration})")
+        
+        # Determine which providers to run
+        provider_names = [force_provider] if (force_provider and force_provider in self.providers) else list(self.providers.keys())
 
         best_result = None
-
-        for name, provider in self.providers.items():
-            self.log.debug(f"Trying provider: {name}...")
+        for name in provider_names:
+            provider = self.providers.get(name)
+            if not provider: continue
+            
+            self.log.debug(f"Querying provider: {name}")
             res = provider.search(meta)
             
             if res:
-                self.log.info(f"Provider {name} returned type: {res['type']}")
-                
-                # Priority Logic: Word (2) > Line (1) > Plain (0)
+                # If we forced a specific provider, take whatever it gives
+                if force_provider:
+                    best_result = res
+                    break
+                # Otherwise, keep searching for the best sync type (Word > Line > Plain)
                 if best_result is None or res['type'] > best_result['type']:
                     best_result = res
-                    if best_result['type'] == LYRIC_TYPE_WORD_SYNCED:
-                        self.log.info("Found optimal Word-Synced lyrics. Stopping search.")
+                    if best_result['type'] == LYRIC_TYPE_WORD_SYNCED: 
                         break 
-                else:
-                    self.log.debug(f"Keeping existing result (Type {best_result['type']}) over new result (Type {res['type']})")
-            else:
-                self.log.debug(f"Provider {name} returned nothing.")
 
         if best_result:
-            self.cache[cache_key] = best_result
-            self.log.info(f"Final Selection: {best_result['provider']} (Type: {best_result['type']})")
+            self.storage.set(cache_key, best_result)
             return best_result
         
-        self.log.warning("All providers failed to find lyrics.")
+        # Corrected error return (removed the log timestamp snippet)
         return {"type": -1, "error": "Lyrics not found"}

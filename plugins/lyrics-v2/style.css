@@ -11,6 +11,7 @@ ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] .message {
 
 ytmusic-section-list-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
     display: block !important;
+
 }
 
 ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] {
@@ -36,17 +37,8 @@ ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #sl-contain
     color: var(--ytmusic-text-primary);
     z-index: 999;
     max-height: 100%;
-}
-
-#sl-header {
-    display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
-    gap: 10px;
-    padding: 15px;
-    background: rgba(0,0,0,0.4);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 
 #sl-content, #plugin-lyrics-content {
@@ -54,7 +46,9 @@ ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #sl-contain
     overflow-y: auto;
     scrollbar-width: none; /* Firefox */
     position: relative;
-    padding: 5% 10%;
+    padding: 5% 0;
+    width: 100%;
+    text-align: center;
 }
 
 #sl-content::-webkit-scrollbar {
@@ -72,18 +66,23 @@ ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #sl-contain
     color: var(--lyric-inactive);
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     filter: blur(2px);
-    transform: scale(0.95);
-    transform-origin: left center;
+    transform: scale(1);
+    transform-origin: center; 
     white-space: pre-wrap;
     display: block;
 }
 
 /* Active State */
 .sl-line.active, .synced-line.current {
-    color: var(--accent-light)!important;
+    color: var(--accent-light) !important;
     filter: blur(0px) !important;
     transform: scale(1.08) !important;
     opacity: 1 !important;
+
+    text-shadow: 
+        0 0 10px var(--accent-alpha-50),
+        0 0 30px var(--accent-alpha-50),
+        0 0 50px rgba(255, 255, 255, 0.3); 
 }
 
 .sl-ts {
@@ -161,4 +160,104 @@ ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #sl-contain
     padding-top: 20%;
     font-size: 1.5rem;
     color: #666;
+}
+
+/* controls */
+
+#sl-provider-info {
+    font-size: 0.85rem;
+    color: var(--ytmusic-text-secondary);
+    font-weight: 500;
+}
+
+/* Grouping the buttons/select */
+#sl-controls {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    
+    /* Initially hidden/faded */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    
+    /* Layout */
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: rgba(0,0,0,0.6);
+    padding: 8px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(4px);
+    width: max-content;
+}
+
+#sl-container:hover #sl-controls,
+#sl-controls:hover {
+    opacity: 1;
+    visibility: visible;
+}
+
+#sl-container.at-top #sl-controls {
+    opacity: 1;
+    visibility: visible;
+}
+
+#sl-provider-select {
+    background: transparent;
+    color: #ffffff;
+    border: none;
+    font-size: 12px;
+    padding: 4px 8px;
+    cursor: pointer;
+    outline: none;
+}
+
+#sl-provider-select option {
+    background-color: rgb(20, 20, 20);
+    color: var(--primary);
+    transition: background-color 0.2s;
+}
+
+#sl-provider-select option:hover {
+    background-color: rgba(25, 25, 25);
+}
+
+.sl-control-btn {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--primary);
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.sl-control-btn:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+#sl-edit-textarea {
+    width: 100%; 
+    min-height: 60vh; 
+    background: rgba(0,0,0,0.4); 
+    color: #fff; 
+    border: 1px solid rgba(255,255,255,0.2); 
+    border-radius: 8px; 
+    padding: 15px; 
+    resize: vertical; 
+    font-family: monospace; 
+    font-size: 15px; 
+    line-height: 1.5;
+    outline: none; 
+    box-sizing: border-box;
+}
+
+.sl-plain-text {
+    font-size: 2em;
 }

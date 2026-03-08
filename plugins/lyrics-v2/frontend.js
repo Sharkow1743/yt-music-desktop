@@ -26,21 +26,22 @@
                 lyrics: null,
                 provider: this.config.default_provider,
                 activeIdx: -1,
-                isFetching: false
+                isFetching: false,
+                isEditing: false // Track edit mode
             };
 
             this.dom = {
                 parent: null,
                 container: null,
+                controls: null,
                 content: null,
                 video: null,
                 ytmusicApp: null
             };
 
-            this.fetchSequence = 0; 
-            
             this._syncLoop = this._syncLoop.bind(this);
             this._handleTrackChange = this._handleTrackChange.bind(this);
+            this._toggleEditMode = this._toggleEditMode.bind(this);
             
             this._log("Plugin instance created.");
         }
@@ -71,11 +72,18 @@
             this._log("Initializing...");
 
             this._setupObservers();
+
+            const initialVideoId = new URLSearchParams(window.location.search).get('v');
+            if (initialVideoId) {
+                this._log(`Initial song detected: ${initialVideoId}`);
+                this._handleTrackChange(initialVideoId);
+            }
+
             requestAnimationFrame(this._syncLoop);
             
             window.addEventListener('sl-unblock', () => {
                 this._log("Received sl-unblock event");
-                this._unblockLyricsTab();
+                this._unlockTabs();
             });
             
             this._unlockTabs();
@@ -119,6 +127,8 @@
             this.state.videoId = videoId;
             this.state.activeIdx = -1;
             this.state.lyrics = null;
+            this.state.isEditing = false; // Reset edit mode on track change
+            this.state.isFetching = true; // FIX: Show fetching state immediately while waiting for metadata
             this.render(); 
 
             let attempts = 0;
@@ -129,8 +139,16 @@
 
                 if ((currentTitle && currentTitle !== oldTitle) || attempts > 15) {
                     clearInterval(checkMetadata);
-                    this._log(`Metadata stabilized after ${attempts} attempts: "${currentTitle}" by ${currentArtist}`);
-                    this.fetchData();
+                    
+                    if (currentTitle && currentArtist) {
+                        this._log(`Metadata stabilized after ${attempts} attempts: "${currentTitle}" by ${currentArtist}`);
+                        this.fetchData();
+                    } else {
+                        // FIX: If metadata resolution completely fails, exit fetch state safely
+                        this._log("Failed to fetch metadata", "", "warn");
+                        this.state.isFetching = false;
+                        this.render();
+                    }
                 }
             }, 200);
         }
@@ -138,7 +156,7 @@
         /**
          * Main data fetching orchestration.
          */
-async fetchData() {
+        async fetchData() {
             if (!this.state.videoId) return;
 
             const title = navigator.mediaSession?.metadata?.title;
@@ -147,23 +165,24 @@ async fetchData() {
 
             if (!title || !artist) {
                 this._log("Missing Metadata.", {title, artist}, 'warn');
+                this.state.isFetching = false;
+                this.render();
                 return;
             }
 
-            // --- CRITICAL FIX 1: Reset state for new song ---
-            this.state.lyrics = null;     // Clear old lyrics
-            this.state.isFetching = true; // Mark as loading
-            this.render();                // Show loading spinner/message
+            this.state.lyrics = null;
+            this.state.isFetching = true;
+            this.render(); 
 
             try {
-                // Start the background process
+                // Notice the 6th argument is `null` to use the auto-provider logic
                 await window.Synced_Lyrics_start_fetch_lyrics(
                     title, artist, album, 
                     this.dom.video?.duration || 0, 
-                    this.state.videoId
+                    this.state.videoId,
+                    null
                 );
 
-                // Start polling (isFetching remains true during polling)
                 this._pollLyricsResult(this.state.videoId, title);
 
             } catch (e) {
@@ -171,62 +190,25 @@ async fetchData() {
                 this.state.isFetching = false;
                 this.render();
             }
-            // Note: No 'finally' block here, because the process isn't done yet!
         }
 
-        async _pollLyricsResult(videoId, title) {
-            const pollInterval = 500;
-
-            const check = async () => {
-                // If song changed during polling, stop this poll
-                if (this.state.videoId !== videoId) return;
-
-                try {
-                    const result = await window.Synced_Lyrics_check_lyrics_result(videoId);
-
-                    if (result && result.status === "pending") {
-                        setTimeout(check, pollInterval);
-                        return;
-                    }
-
-                    // --- CRITICAL FIX 2: Data has arrived ---
-                    if (result && !result.error) {
-                        this.state.lyrics = result;
-                    } else {
-                        this._log(`No lyrics for ${title}`, result?.error, 'warn');
-                        this.state.lyrics = null;
-                    }
-                } catch (e) {
-                    this._log("Polling error:", e, 'error');
-                } finally {
-                    // --- CRITICAL FIX 3: Only stop loading state NOW ---
-                    this.state.isFetching = false;
-                    this.render(); 
-                }
-            };
-
-            setTimeout(check, pollInterval);
-        }
-
-        // New Polling logic
+        /**
+         * Polls the backend for the lyrics result.
+         */
         async _pollLyricsResult(videoId, title) {
             const pollInterval = 500; // Check every 500ms
 
             const check = async () => {
-                // Important: If the user changed the track while we were waiting, abort cleanly!
                 if (this.state.videoId !== videoId) return;
 
                 try {
-                    // Call the fast, non-blocking check function
                     const result = await window.Synced_Lyrics_check_lyrics_result(videoId);
 
                     if (result?.status === "pending") {
-                        // Not ready yet, check again in 500ms
                         setTimeout(check, pollInterval);
                         return;
                     }
 
-                    // We got the final result!
                     if (result && !result.error) {
                         const typeStr = result.type === 0 ? 'Plain' : (result.type === 2 ? 'Rich/Word' : 'Line-synced');
                         this._log(`Successfully fetched ${typeStr} lyrics from ${result.provider || 'Backend'}`);
@@ -244,7 +226,6 @@ async fetchData() {
                 }
             };
 
-            // Start the loop
             setTimeout(check, pollInterval);
         }
         
@@ -301,9 +282,10 @@ async fetchData() {
                 return;
             }
 
-            if (this.dom.parent.getAttribute('page-type') !== 'MUSIC_PAGE_TYPE_TRACK_LYRICS') { return }
+            if (this.dom.parent.getAttribute('page-type') !== 'MUSIC_PAGE_TYPE_TRACK_LYRICS') { return; }
 
             this._renderContainer();
+            this._renderControls();
             this._renderContent();
         }
         
@@ -322,21 +304,151 @@ async fetchData() {
             this.dom.parent.appendChild(this.dom.container);
         }
 
+        _renderControls() {
+            if (document.getElementById('sl-controls')) {
+                // Update provider info text if it already exists
+                const info = document.getElementById('sl-provider-info');
+                if (info) {
+                    info.innerText = this.state.lyrics ? `Source:\n${this.state.lyrics.provider || 'Unknown'}` : '';
+                }
+                return;
+            }
+
+            this.dom.controls = document.createElement('div');
+            this.dom.controls.id = 'sl-controls';
+
+            this.dom.controls.innerHTML = `
+                <select id="sl-provider-select">
+                    <option value="">Auto Provider</option>
+                    <option value="MusixMatch">MusixMatch</option>
+                    <option value="LRCLib">LRCLib</option>
+                    <option value="Genius">Genius</option>
+                </select>
+                <button id="sl-refetch-btn" class="sl-control-btn">Refetch</button>
+                <button id="sl-edit-btn" class="sl-control-btn">Edit</button>
+                <span id="sl-provider-info"></span>
+            `;
+                
+            // Insert controls before the lyrics content
+            this.dom.container.insertBefore(this.dom.controls, this.dom.content);
+                        
+            // Button hover effects
+            ['sl-refetch-btn', 'sl-edit-btn'].forEach(id => {
+                const btn = document.getElementById(id);
+                btn.addEventListener('mouseover', () => btn.style.background = 'rgba(255,255,255,0.2)');
+                btn.addEventListener('mouseout', () => btn.style.background = 'rgba(255,255,255,0.1)');
+            });
+
+            // Refetch Button Logic
+            document.getElementById('sl-refetch-btn').onclick = async () => {
+                if (this.state.isEditing) return; // Prevent refetching while editing
+                
+                const provider = document.getElementById('sl-provider-select').value;
+                this.state.isFetching = true;
+                this.state.lyrics = null;
+                this.render();
+                
+                const title = navigator.mediaSession?.metadata?.title;
+                const artist = navigator.mediaSession?.metadata?.artist;
+                const album = navigator.mediaSession?.metadata?.album || "";
+                
+                try {
+                    await window.Synced_Lyrics_start_fetch_lyrics(
+                        title, artist, album, 
+                        this.dom.video?.duration || 0, 
+                        this.state.videoId, 
+                        provider || null
+                    );
+                    this._pollLyricsResult(this.state.videoId, title);
+                } catch (e) {
+                    this._log("Refetch error", e, "error");
+                    this.state.isFetching = false;
+                    this.render();
+                }
+            };
+            
+            // Edit Button Logic
+            document.getElementById('sl-edit-btn').onclick = this._toggleEditMode;
+        }
+
+        async _toggleEditMode() {
+            const btn = document.getElementById('sl-edit-btn');
+            
+            if (this.state.isEditing) {
+                // --- SAVE LOGIC ---
+                const textarea = document.getElementById('sl-edit-textarea');
+                if (!textarea) return;
+
+                const rawText = textarea.value;
+                this.state.isEditing = false;
+                this.state.isFetching = true;
+                btn.innerText = 'Edit';
+                this.render(); // Show loading state
+                
+                try {
+                    const res = await window.Synced_Lyrics_save_edited_lyrics(this.state.videoId, rawText);
+                    if (res && !res.error) {
+                        this.state.lyrics = res;
+                    } else {
+                        this._log("Save returned error", res.error, "warn");
+                    }
+                } catch (e) {
+                    this._log("Save failed", e, "error");
+                } finally {
+                    this.state.isFetching = false;
+                    this.render();
+                }
+            } else {
+                // --- ENTER EDIT MODE ---
+                this.state.isEditing = true;
+                btn.innerText = 'Save';
+                
+                let textContent = '';
+                if (this.state.lyrics) {
+                    if (this.state.lyrics.type === 0) {
+                        textContent = this.state.lyrics.lyrics; // Plain text
+                    } else {
+                        // Reconstruct standard LRC format
+                        textContent = this.state.lyrics.lyrics.map(line => {
+                            const totalSec = Math.floor(line.time / 1000);
+                            const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
+                            const s = String(totalSec % 60).padStart(2, '0');
+                            const msStr = String(line.time % 1000).padStart(3, '0').slice(0, 2);
+                            return `[${m}:${s}.${msStr}] ${line.text}`;
+                        }).join('\n');
+                    }
+                }
+                
+                // Replace content with textarea
+                this.dom.content.innerHTML = `
+                    <textarea id="sl-edit-textarea" placeholder="Enter LRC or plain lyrics here..."></textarea>
+                `;
+                document.getElementById('sl-edit-textarea').value = textContent;
+            }
+        }
+
         _renderContent() {
+            // Prevent re-rendering content area if the user is typing/editing
+            if (this.state.isEditing) return;
+
             this.dom.content = this.dom.content || document.getElementById('sl-content');
             if (!this.dom.content) return;
 
             if (this.state.isFetching) {
+                this.dom.content.dataset.hash = ''; // FIX: Clear hash to guarantee re-render when lyrics arrive
                 this.dom.content.innerHTML = '<div class="sl-msg">Fetching Lyrics...</div>';
             } else if (this.state.lyrics) {
                 this._renderLyrics();
             } else {
+                this.dom.content.dataset.hash = ''; // FIX: Clear hash
                 this.dom.content.innerHTML = '<div class="sl-msg">Lyrics not found :(</div>';
             }
         }
         
         _renderLyrics() {
             const currentHash = this.state.videoId + (this.state.lyrics.provider || 'unknown');
+            
+            // This prevents rapid DOM thrashing if the exact same lyrics object is already drawn
             if (this.dom.content.dataset.hash === currentHash) return;
 
             this._log(`Rendering lyrics list. Type: ${this.state.lyrics.type}`);
@@ -392,12 +504,12 @@ async fetchData() {
             });
         }
 
-
         /**
          * The main loop for synchronizing lyrics with video playback.
          */
-         _syncLoop() {
-            if (this.state.lyrics?.type === 0 || !this.state.lyrics || this.state.isFetching) {
+        _syncLoop() {
+            // Do not run sync loop updates if the user is editing, fetching, or viewing plain lyrics
+            if (this.state.isEditing || this.state.isFetching || this.state.lyrics?.type === 0 || !this.state.lyrics) {
                 requestAnimationFrame(this._syncLoop);
                 return;
             }
