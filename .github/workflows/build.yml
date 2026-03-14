@@ -68,7 +68,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           # Install ruby dependencies and bsdtar required by fpm to build Arch packages
-          sudo apt-get install -y ruby ruby-dev rubygems bsdtar
+          sudo apt-get install -y ruby ruby-dev rubygems libarchive-tools
           sudo gem install fpm
 
       - name: Build Arch & Debian Packages
