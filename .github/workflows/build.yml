@@ -56,18 +56,67 @@ jobs:
           find release_dir/plugins -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
           find release_dir -exec touch {} +
 
-      - name: Zip Release
+      - name: Zip Release (Linux Portable)
+        if: runner.os == 'Linux'
         uses: thedoctor0/zip-release@0.7.6
         with:
           type: 'zip'
-          # We tell it to name the file in the parent directory (root)
           filename: '../${{ matrix.asset_name }}' 
           directory: 'release_dir'
+
+      - name: Install Packaging Tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Install ruby dependencies and bsdtar required by fpm to build Arch packages
+          sudo apt-get install -y ruby ruby-dev rubygems bsdtar
+          sudo gem install fpm
+
+      - name: Build Arch & Debian Packages
+        if: runner.os == 'Linux'
+        run: |
+          # 1. Create standard Linux filesystem structure
+          mkdir -p pkg_root/opt/yt-music
+          mkdir -p pkg_root/usr/bin
+          mkdir -p pkg_root/usr/share/applications
+
+          # 2. Copy the standalone folder into /opt/yt-music
+          cp -a release_dir/* pkg_root/opt/yt-music/
+
+          # IMPORTANT RUNTIME FIX: Since PyWebview downloads files to the lib folder 
+          # at runtime, the folder must be writable. Normally /opt is read-only for users.
+          sudo chmod -R 777 pkg_root/opt/yt-music/
+
+          # 3. Create a symlink so it can be run from the terminal anywhere
+          ln -s /opt/yt-music/${{ matrix.executable_name }} pkg_root/usr/bin/yt-music
+
+          # 4. Create a .desktop file so it appears in the App Launcher / Start Menu
+          cat <<EOF > pkg_root/usr/share/applications/yt-music.desktop
+          [Desktop Entry]
+          Name=YT Music
+          Exec=/usr/bin/yt-music
+          Icon=audio-x-generic
+          Type=Application
+          Categories=AudioVideo;Audio;Player;
+          EOF
+
+          # 5. Extract Version from Release Tag (Defaults to 1.0.0 if not found)
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}" # Strips the 'v' (e.g., v1.0.0 becomes 1.0.0)
+          if [ -z "$VERSION" ]; then VERSION="1.0.0"; fi
+
+          # 6. Build the Arch Linux Package (.pkg.tar.zst)
+          fpm -s dir -t pacman -n yt-music -v "$VERSION" --architecture x86_64 -p yt-music-arch.pkg.tar.zst -C pkg_root .
+
+          # 7. Build the Debian Package (.deb) (Bonus, for Ubuntu/Mint users)
+          fpm -s dir -t deb -n yt-music -v "$VERSION" --architecture amd64 -p yt-music-ubuntu.deb -C pkg_root .
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
-          # Now it will find the file in the root
-          files: ${{ matrix.asset_name }}
+          # Uploads the zip, the arch package, and the deb package
+          files: |
+            ${{ matrix.asset_name }}
+            *.pkg.tar.zst
+            *.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
