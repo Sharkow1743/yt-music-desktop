@@ -46,7 +46,7 @@ ytmusic-tab-renderer:not([page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]) #sl-contain
     overflow-y: auto;
     scrollbar-width: none; /* Firefox */
     position: relative;
-    padding: 5% 0;
+    padding: 5% 5%;
     width: 100%;
     text-align: center;
 }

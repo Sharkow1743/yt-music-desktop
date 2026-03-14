@@ -10,7 +10,11 @@ def main():
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
-    w = webview.webview.Webview(debug=True, size=webview.Size(800, 600, webview.SizeHint.MIN))
+    os.environ['WEBKIT_DISABLE_COMPOSITING_MODE'] = '1'
+    os.environ['WEBKIT_FORCE_SANDBOX'] = '0'
+
+    w = webview.webview.Webview(debug=True, size=webview.Size(1000, 600, webview.SizeHint.NONE))
+    w.size = webview.Size(1000, 600, webview.SizeHint.MIN)
     w.title = "YouTube Music"
     w.navigate("https://music.youtube.com")
 
