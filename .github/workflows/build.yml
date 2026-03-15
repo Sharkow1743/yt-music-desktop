@@ -73,7 +73,7 @@ jobs:
           mkdir -p release_dir/webview
           
           # We download the exact file the app is requesting directly into the bundle
-          if[ "$RUNNER_OS" == "Linux" ]; then
+          if [ "$RUNNER_OS" == "Linux" ]; then
             echo "Injecting Linux webview library..."
             curl -L -o release_dir/webview/libwebview.x86_64.so https://github.com/webview/webview_deno/releases/download/0.9.0/libwebview.x86_64.so
           elif [ "$RUNNER_OS" == "Windows" ]; then
