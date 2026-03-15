@@ -67,6 +67,20 @@ jobs:
           cp -r main.dist/. release_dir/
           if [ -d "plugins" ]; then cp -r plugins release_dir/plugins/; fi
           find release_dir/plugins -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          
+          # --- THE FIX: MANUALLY INJECT WEBVIEW BINARIES ---
+          # We create the folder the app is looking for
+          mkdir -p release_dir/webview
+          
+          # We download the exact file the app is requesting directly into the bundle
+          if[ "$RUNNER_OS" == "Linux" ]; then
+            echo "Injecting Linux webview library..."
+            curl -L -o release_dir/webview/libwebview.x86_64.so https://github.com/webview/webview_deno/releases/download/0.9.0/libwebview.x86_64.so
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            echo "Injecting Windows webview library..."
+            curl -L -o release_dir/webview/webview.dll https://github.com/webview/webview_deno/releases/download/0.9.0/webview.dll
+          fi
+          
           find release_dir -exec touch {} +
 
       # -- REPLACED ZIP ACTION WITH NATIVE PYTHON --

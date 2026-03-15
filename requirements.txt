@@ -4,3 +4,4 @@ webview_python
 Requests
 rich
 verboselogs
+certifi

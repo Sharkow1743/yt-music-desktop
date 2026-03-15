@@ -1,5 +1,10 @@
 import os
+import certifi
 from logger import get_logger
+
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+
 import webview
 from plugin import PluginManager
 
