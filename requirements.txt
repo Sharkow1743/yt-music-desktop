@@ -1,6 +1,6 @@
 beautifulsoup4
 pydantic
-webview_python
+pywebview
 Requests
 rich
 verboselogs

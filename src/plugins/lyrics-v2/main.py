@@ -498,14 +498,14 @@ class GeniusProvider(BaseLyricsProvider):
 
     
 class Main:
-    def __init__(self, window: webview.webview.Webview, config, logger, storage):
+    def __init__(self, config, logger, storage):
         self.config = config
         self.log = logger
-        self.window = window 
+        self.window = None  
         self.storage = storage
         self._async_results = {}
         
-        self.providers: dict[str, BaseLyricsProvider] = {
+        self.providers: dict[str, Any] = {
             "LRCLib": LRCLibProvider(logger),
             "Genius": GeniusProvider(logger),
             "MusixMatch": MusixMatchProvider(logger),
@@ -519,7 +519,7 @@ class Main:
             
         thread = threading.Thread(
             target=self._background_worker,
-            args=(title, artist, album, duration, video_id, force_provider), # Passed force_provider
+            args=(title, artist, album, duration, video_id, force_provider),
             daemon=True
         )
         thread.start()
@@ -540,8 +540,9 @@ class Main:
     def save_edited_lyrics(self, video_id, raw_text):
         self.log.info(f"Saving edited lyrics for {video_id}")
         sync_type, parsed = LyricsParser.parse(raw_text, self.log)
-        result = {"type": sync_type, "lyrics": parsed, "provider": "User (Edited)"}
         
+        result = {"type": sync_type, "lyrics": parsed, "provider": "User (Edited)"}
+
         self.storage.set(video_id, result)
         self._async_results[video_id] = result
         return result
@@ -563,7 +564,6 @@ class Main:
 
         meta = {"title": title, "artist": artist, "album": album, "duration": duration, "videoId": video_id}
         
-        # Determine which providers to run
         provider_names = [force_provider] if (force_provider and force_provider in self.providers) else list(self.providers.keys())
 
         best_result = None
@@ -575,11 +575,9 @@ class Main:
             res = provider.search(meta)
             
             if res:
-                # If we forced a specific provider, take whatever it gives
                 if force_provider:
                     best_result = res
                     break
-                # Otherwise, keep searching for the best sync type (Word > Line > Plain)
                 if best_result is None or res['type'] > best_result['type']:
                     best_result = res
                     if best_result['type'] == LYRIC_TYPE_WORD_SYNCED: 
@@ -589,5 +587,4 @@ class Main:
             self.storage.set(cache_key, best_result)
             return best_result
         
-        # Corrected error return (removed the log timestamp snippet)
         return {"type": -1, "error": "Lyrics not found"}

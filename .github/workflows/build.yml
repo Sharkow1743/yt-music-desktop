@@ -68,22 +68,8 @@ jobs:
           if [ -d "plugins" ]; then cp -r plugins release_dir/plugins/; fi
           find release_dir/plugins -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
           
-          # --- THE FIX: MANUALLY INJECT WEBVIEW BINARIES ---
-          # We create the folder the app is looking for
-          mkdir -p release_dir/webview
-          
-          # We download the exact file the app is requesting directly into the bundle
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            echo "Injecting Linux webview library..."
-            curl -L -o release_dir/webview/libwebview.x86_64.so https://github.com/webview/webview_deno/releases/download/0.9.0/libwebview.x86_64.so
-          elif [ "$RUNNER_OS" == "Windows" ]; then
-            echo "Injecting Windows webview library..."
-            curl -L -o release_dir/webview/webview.dll https://github.com/webview/webview_deno/releases/download/0.9.0/webview.dll
-          fi
-          
           find release_dir -exec touch {} +
 
-      # -- REPLACED ZIP ACTION WITH NATIVE PYTHON --
       - name: Zip Release (Cross-Platform)
         run: |
           python -c "import shutil; shutil.make_archive('${{ matrix.asset_name }}'.replace('.zip', ''), 'zip', 'release_dir')"
@@ -120,7 +106,7 @@ jobs:
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
-          fail_on_unmatched_files: false # Crucial! Prevents failing on Windows when .deb and .pkg.tar.zst are not found
+          fail_on_unmatched_files: false
           files: |
             ${{ matrix.asset_name }}
             *.pkg.tar.zst

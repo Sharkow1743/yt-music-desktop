@@ -128,7 +128,7 @@
             this.state.activeIdx = -1;
             this.state.lyrics = null;
             this.state.isEditing = false; // Reset edit mode on track change
-            this.state.isFetching = true; // FIX: Show fetching state immediately while waiting for metadata
+            this.state.isFetching = true; // Show fetching state immediately while waiting for metadata
             this.render(); 
 
             let attempts = 0;
@@ -144,7 +144,7 @@
                         this._log(`Metadata stabilized after ${attempts} attempts: "${currentTitle}" by ${currentArtist}`);
                         this.fetchData();
                     } else {
-                        // FIX: If metadata resolution completely fails, exit fetch state safely
+                        // If metadata resolution completely fails, exit fetch state safely
                         this._log("Failed to fetch metadata", "", "warn");
                         this.state.isFetching = false;
                         this.render();
@@ -175,8 +175,8 @@
             this.render(); 
 
             try {
-                // Notice the 6th argument is `null` to use the auto-provider logic
-                await window.Synced_Lyrics_start_fetch_lyrics(
+                // Fetch using Pywebview API tree
+                await window.pywebview.api.Synced_Lyrics.start_fetch_lyrics(
                     title, artist, album, 
                     this.dom.video?.duration || 0, 
                     this.state.videoId,
@@ -202,7 +202,8 @@
                 if (this.state.videoId !== videoId) return;
 
                 try {
-                    const result = await window.Synced_Lyrics_check_lyrics_result(videoId);
+                    // Check Result using Pywebview API tree
+                    const result = await window.pywebview.api.Synced_Lyrics.check_lyrics_result(videoId);
 
                     if (result?.status === "pending") {
                         setTimeout(check, pollInterval);
@@ -306,7 +307,6 @@
 
         _renderControls() {
             if (document.getElementById('sl-controls')) {
-                // Update provider info text if it already exists
                 const info = document.getElementById('sl-provider-info');
                 if (info) {
                     info.innerText = this.state.lyrics ? `Source:\n${this.state.lyrics.provider || 'Unknown'}` : '';
@@ -329,19 +329,14 @@
                 <span id="sl-provider-info"></span>
             `;
                 
-            // Insert controls before the lyrics content
-            this.dom.container.insertBefore(this.dom.controls, this.dom.content);
-                        
-            // Button hover effects
-            ['sl-refetch-btn', 'sl-edit-btn'].forEach(id => {
+            this.dom.container.insertBefore(this.dom.controls, this.dom.content);['sl-refetch-btn', 'sl-edit-btn'].forEach(id => {
                 const btn = document.getElementById(id);
                 btn.addEventListener('mouseover', () => btn.style.background = 'rgba(255,255,255,0.2)');
                 btn.addEventListener('mouseout', () => btn.style.background = 'rgba(255,255,255,0.1)');
             });
 
-            // Refetch Button Logic
             document.getElementById('sl-refetch-btn').onclick = async () => {
-                if (this.state.isEditing) return; // Prevent refetching while editing
+                if (this.state.isEditing) return; 
                 
                 const provider = document.getElementById('sl-provider-select').value;
                 this.state.isFetching = true;
@@ -353,7 +348,8 @@
                 const album = navigator.mediaSession?.metadata?.album || "";
                 
                 try {
-                    await window.Synced_Lyrics_start_fetch_lyrics(
+                    // Refetch call Using Pywebview API tree
+                    await window.pywebview.api.Synced_Lyrics.start_fetch_lyrics(
                         title, artist, album, 
                         this.dom.video?.duration || 0, 
                         this.state.videoId, 
@@ -367,7 +363,6 @@
                 }
             };
             
-            // Edit Button Logic
             document.getElementById('sl-edit-btn').onclick = this._toggleEditMode;
         }
 
@@ -383,10 +378,11 @@
                 this.state.isEditing = false;
                 this.state.isFetching = true;
                 btn.innerText = 'Edit';
-                this.render(); // Show loading state
+                this.render(); 
                 
                 try {
-                    const res = await window.Synced_Lyrics_save_edited_lyrics(this.state.videoId, rawText);
+                    // Save call Using Pywebview API tree
+                    const res = await window.pywebview.api.Synced_Lyrics.save_edited_lyrics(this.state.videoId, rawText);
                     if (res && !res.error) {
                         this.state.lyrics = res;
                     } else {
@@ -408,7 +404,6 @@
                     if (this.state.lyrics.type === 0) {
                         textContent = this.state.lyrics.lyrics; // Plain text
                     } else {
-                        // Reconstruct standard LRC format
                         textContent = this.state.lyrics.lyrics.map(line => {
                             const totalSec = Math.floor(line.time / 1000);
                             const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
@@ -419,7 +414,6 @@
                     }
                 }
                 
-                // Replace content with textarea
                 this.dom.content.innerHTML = `
                     <textarea id="sl-edit-textarea" placeholder="Enter LRC or plain lyrics here..."></textarea>
                 `;
@@ -428,19 +422,18 @@
         }
 
         _renderContent() {
-            // Prevent re-rendering content area if the user is typing/editing
             if (this.state.isEditing) return;
 
             this.dom.content = this.dom.content || document.getElementById('sl-content');
             if (!this.dom.content) return;
 
             if (this.state.isFetching) {
-                this.dom.content.dataset.hash = ''; // FIX: Clear hash to guarantee re-render when lyrics arrive
+                this.dom.content.dataset.hash = ''; 
                 this.dom.content.innerHTML = '<div class="sl-msg">Fetching Lyrics...</div>';
             } else if (this.state.lyrics) {
                 this._renderLyrics();
             } else {
-                this.dom.content.dataset.hash = ''; // FIX: Clear hash
+                this.dom.content.dataset.hash = ''; 
                 this.dom.content.innerHTML = '<div class="sl-msg">Lyrics not found :(</div>';
             }
         }
@@ -448,7 +441,6 @@
         _renderLyrics() {
             const currentHash = this.state.videoId + (this.state.lyrics.provider || 'unknown');
             
-            // This prevents rapid DOM thrashing if the exact same lyrics object is already drawn
             if (this.dom.content.dataset.hash === currentHash) return;
 
             this._log(`Rendering lyrics list. Type: ${this.state.lyrics.type}`);
@@ -504,11 +496,7 @@
             });
         }
 
-        /**
-         * The main loop for synchronizing lyrics with video playback.
-         */
         _syncLoop() {
-            // Do not run sync loop updates if the user is editing, fetching, or viewing plain lyrics
             if (this.state.isEditing || this.state.isFetching || this.state.lyrics?.type === 0 || !this.state.lyrics) {
                 requestAnimationFrame(this._syncLoop);
                 return;
@@ -523,13 +511,11 @@
             const currentTimeMs = (this.dom.video.currentTime * 1000) + this.config.offset;
             const lines = this.state.lyrics.lyrics;
 
-            // 1. Find active Line
             let newActiveIdx = lines.findIndex(line => line.time > currentTimeMs);
             if (newActiveIdx === -1) newActiveIdx = lines.length - 1;
             else newActiveIdx -= 1;
             
             if (newActiveIdx !== this.state.activeIdx) {
-                this._log(`Sync: Line change [${this.state.activeIdx} -> ${newActiveIdx}]`);
                 this.state.activeIdx = newActiveIdx;
                 const rows = this.dom.content.querySelectorAll('.sl-line');
                 
@@ -542,7 +528,6 @@
                 });
             }
 
-            // 2. Handle Word Highlighting (Type 2 / Karaoke)
             if (this.state.lyrics.type === 2 && this.state.activeIdx !== -1) {
                 const activeRow = this.dom.content.children[this.state.activeIdx];
                 if (activeRow) {
@@ -571,14 +556,12 @@
             requestAnimationFrame(this._syncLoop);
         }
 
-        // --- DOM Helpers ---
         _unlockTabs() {
             const tabs = document.querySelectorAll('#tabsContent tp-yt-paper-tab'); 
             if (!tabs || tabs.length === 0) return;
             
             tabs.forEach((tab) => {
                 if (tab.hasAttribute('disabled')) {
-                    this._log("Unlocking disabled UI tabs");
                     tab.removeAttribute('disabled');
                     tab.setAttribute('aria-disabled', 'false');
                     tab.disabled = false;
@@ -599,7 +582,6 @@
         plugin.init();
     }
     
-    // Slight delay to ensure host environment (pywebview) is injected
     setTimeout(main, 500);
 
 })();

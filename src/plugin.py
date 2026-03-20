@@ -1,6 +1,7 @@
 import inspect
 import json
 import os
+from pathlib import Path
 import sys
 import types
 from typing import Any, Optional
@@ -51,21 +52,16 @@ class ManifestModel(BaseModel):
     files: list[str] = []
     python_script: Optional[str] = None
     config: list[ConfigPropertyModel] = []
-    dependencies: list[str] = []
+    dependencies: list[str] =[]
 
 # --- Core Logic ---
 
 def get_base_path():
     """Get the root directory of the application reliably."""
-    if hasattr(sys, 'frozen'):
-        # If running as a compiled .exe (PyInstaller)
-        return os.path.dirname(sys.executable)
+    if getattr(sys, 'frozen', False):
+        return str(Path(sys.executable).parent.resolve())
     
-    # Get the directory where this specific file (e.g., plugin.py) is located
-    # current_file_dir = os.path.dirname(os.path.abspath(__file__))
-    current_file_dir = os.getcwd()
-    
-    return current_file_dir
+    return str(Path(__file__).parent.resolve())
 
 class PluginStorage:
     def __init__(self, db_path):
@@ -87,13 +83,12 @@ class PluginStorage:
         self.conn.commit()
 
 class Plugin:
-    def __init__(self, window: webview.webview.Webview, folder: str, manifest_file: str = 'manifest.json'):
+    def __init__(self, folder: str, manifest_file: str = 'manifest.json'):
         self.folder = folder
         self.manifest_file = manifest_file
         self.manifest: ManifestModel = ManifestModel()
         self.python_instance = None
         self._is_loaded = False
-        self.window = window
         
         self.log = get_logger(f"plugin.{os.path.basename(folder)}")
         self.load()
@@ -131,7 +126,6 @@ class Plugin:
         """
         Loads the plugin's Python module using exec() to bypass timestamp/metadata checks.
         """
-        
         script_path = os.path.join(self.folder, self.manifest.python_script)
         vendor_path = os.path.join(self.folder, 'lib') 
         self.log.verbose(f"Attempting to load Python backend from: {script_path}")
@@ -140,59 +134,46 @@ class Plugin:
             self.log.error(f"Python script '{self.manifest.python_script}' missing from folder.")
             return
 
-        # Temporarily add the vendored library path to sys.path
         if os.path.isdir(vendor_path):
             sys.path.insert(0, vendor_path)
 
         try:
-            # Generate a unique module name
             module_name = f"plugin_mod_{self.manifest.name.replace(' ', '_')}"
             
-            # 1. Read the code as a simple string (ignores file date/metadata)
             with open(script_path, 'r', encoding='utf-8') as f:
                 source_code = f.read()
 
-            # 2. Create a fresh module object
             module = types.ModuleType(module_name)
             module.__file__ = script_path
-            
-            # 3. Add to sys.modules (allows the plugin to import itself if needed)
             sys.modules[module_name] = module
 
-            # 4. Execute the code directly into the module
             exec(source_code, module.__dict__)
 
-            # Check for the Main class as before
             if hasattr(module, 'Main'):
                 self.log.verbose("Found 'Main' class. Instantiating with dependency injection...")
                 
-                # 1. Initialize dependencies
                 config_dict = {p.name: p.value for p in self.manifest.config}
                 storage_path = os.path.join(self.folder, 'storage.db')
                 self.storage = PluginStorage(storage_path)
                 logger_instance = get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}')
 
-                # 2. Map available dependencies by the exact argument names you expect plugins to use
+                # Note: 'window' is omitted here because it hasn't been created yet. 
+                # It will be dynamically assigned onto the instance via .apply()
                 available_dependencies = {
-                    'window': self.window,
                     'config': config_dict,
                     'logger': logger_instance,
                     'storage': self.storage
                 }
 
-                # 3. Inspect the plugin's Main class to see what it wants
                 sig = inspect.signature(module.Main)
-                
                 kwargs_to_pass = {}
                 accepts_kwargs = False
                 
                 for param_name, param in sig.parameters.items():
-                    # If the plugin has **kwargs, it accepts everything
                     if param.kind == inspect.Parameter.VAR_KEYWORD:
                         accepts_kwargs = True
                         break
                     
-                    # If it asks for a specific dependency we know about, provide it
                     if param_name in available_dependencies:
                         kwargs_to_pass[param_name] = available_dependencies[param_name]
                     else:
@@ -201,7 +182,6 @@ class Plugin:
                 if accepts_kwargs:
                     kwargs_to_pass = available_dependencies
 
-                # 4. Instantiate with only the requested arguments
                 self.python_instance = module.Main(**kwargs_to_pass)
             else:
                 self.log.verbose("No 'Main' class found. Using raw module export.")
@@ -226,13 +206,12 @@ class Plugin:
             self.log.error(f"Error reading file {filename}: {e}")
         return ""
 
-    def apply(self):
+    def apply(self, window: webview.Window):
         self.log.info(f"Injecting {self.manifest.name}...")
 
         if self.python_instance:
-            self.log.verbose('Found python inctance')
-
-            self._bind_python_module()
+            self.python_instance.window = window
+            self.log.verbose('Found python instance. Window injected.')
 
             if hasattr(self.python_instance, 'on_ready') and callable(self.python_instance.on_ready):
                 try:
@@ -244,55 +223,20 @@ class Plugin:
         # 1. Prepare Configuration
         config_data = {prop.name: prop.value for prop in self.manifest.config}
         
-        # 2. The "Bootstrap" script: Bypasses TrustedHTML and sets up the CSS enforcer
-        bootstrap_js = f"""
-        (function() {{
-            // --- 1. TrustedHTML Bypass ---
-            if (window.trustedTypes && !window.trustedTypes.defaultPolicy) {{
-                try {{
-                    window.trustedTypes.createPolicy('default', {{
-                        createHTML: (s) => s,
-                        createScript: (s) => s,
-                        createScriptURL: (s) => s
-                    }});
-                }} catch (e) {{ console.warn("TrustedTypes policy could not be created:", e); }}
-            }}
-
-            // --- 2. CSS Enforcement Engine ---
-            // This system ensures styles are applied directly to elements and stay there.
-            window._pluginStyles = window._pluginStyles || {{}};
-            window._pluginStyles['{self.manifest.name}'] = [];
-
-            const applyEnforcedStyles = () => {{
-                window._pluginStyles['{self.manifest.name}'].forEach(rule => {{
-                    document.querySelectorAll(rule.selector).forEach(el => {{
-                        for (let [prop, value] of Object.entries(rule.styles)) {{
-                            // Apply with !important and use setProperty to bypass standard attribute blocks
-                            if (el.style.getPropertyValue(prop) !== value) {{
-                                el.style.setProperty(prop, value, 'important');
-                            }}
-                        }}
-                    }});
-                }});
-            }};
-
-            // Observe DOM changes to re-apply styles to new elements immediately
-            const observer = new MutationObserver(applyEnforcedStyles);
-            observer.observe(document.documentElement, {{ childList: true, subtree: true, attributes: true }});
+        bootstrap_path = os.path.join(get_base_path(), 'bootstrap.js')
+        if os.path.exists(bootstrap_path):
+            with open(bootstrap_path, 'r', encoding='utf-8') as f:
+                bootstrap_js = f.read()
             
-            window.enforceStyle = (selector, styleObject) => {{
-                window._pluginStyles['{self.manifest.name}'].push({{selector, styles: styleObject}});
-                applyEnforcedStyles();
-            }};
-
-            // --- 3. Configuration ---
-            window.pluginConfig = window.pluginConfig || {{}};
-            window.pluginConfig['{self.manifest.name}'] = {json.dumps(config_data)};
-        }})();
-        """
-        
-        # Execute bootstrap
-        self.window.eval(bootstrap_js)
+            # Pass data to Javascript via window object before executing bootstrap
+            setup_vars_js = f"""
+                window._currentPluginInitName = {json.dumps(self.manifest.name)};
+                window._currentPluginInitConfig = {json.dumps(config_data)};
+            """
+            window.run_js(setup_vars_js)
+            window.run_js(bootstrap_js)
+        else:
+            self.log.error(f"'bootstrap.js' not found at {bootstrap_path}")
 
         # 3. Inject Files
         for file in self.manifest.files:
@@ -301,11 +245,8 @@ class Plugin:
                 continue
             
             if file.endswith('.css'):
-                # Convert CSS string to a JS-compatible object for the Enforcer
-                # Note: For complex CSS, you might need a small parser here. 
-                # This logic assumes a helper or simple direct injection for the "system" you requested.
                 safe_css = json.dumps(content)
-                self.window.eval(f"""
+                window.run_js(f"""
                     (function() {{
                         const styleTag = document.createElement('style');
                         styleTag.id = 'plugin-style-{self.manifest.name}';
@@ -315,10 +256,8 @@ class Plugin:
                 """)
                 
             elif file.endswith('.js'):
-                # Inject JS with no restrictions
-                # Wrapping in a try-catch to ensure one failing file doesn't break the loop
-                safe_js = content # Content is already raw JS
-                self.window.eval(f"""
+                safe_js = content
+                window.run_js(f"""
                     try {{
                         {safe_js}
                     }} catch (e) {{
@@ -328,20 +267,8 @@ class Plugin:
 
         self.log.success(f"Injection complete for {self.manifest.name}")
 
-    def _bind_python_module(self):
-        safe_name = self.manifest.name.replace(" ", "_")
-        for attr_name in dir(self.python_instance):
-            if attr_name.startswith("_"): continue
-            attr = getattr(self.python_instance, attr_name)
-            if callable(attr):
-                bind_name = f"{safe_name}_{attr_name}"
-                self.window.bind(bind_name, attr)
-                self.log.spam(f"Bound: window.{bind_name}")
-
 class PluginManager:
-    def __init__(self, window: webview.webview.Webview):
-        # Locate the /plugins folder relative to this script
-        self.window = window
+    def __init__(self):
         self.plugin_base = os.path.join(get_base_path(), 'plugins')
         
         if not os.path.exists(self.plugin_base):
@@ -365,15 +292,12 @@ class PluginManager:
         for item in all_items:
             item_path = os.path.join(self.plugin_base, item)
             
-            # Skip hidden folders or python metadata
             if item.startswith(('.', '__')): 
                 continue
-            
-            # Only process folders
             if not os.path.isdir(item_path):
                 continue
 
-            plugin = Plugin(self.window, item_path)
+            plugin = Plugin(item_path)
             if plugin.is_valid:
                 self.plugins[plugin.manifest.name] = plugin
             else:
@@ -381,7 +305,22 @@ class PluginManager:
         
         self.log.success(f"Total plugins loaded: {len(self.plugins)}")
 
-    def inject_plugins(self):
+    def get_combined_api(self):
+        self.log.verbose("Synthesizing combined API for pywebview...")
+        class CombinedAPI:
+            pass
+
+        api = CombinedAPI()
+        
+        for name, plugin in self.plugins.items():
+            if plugin.python_instance:
+                safe_name = name.replace(" ", "_")
+                setattr(api, safe_name, plugin.python_instance)
+                self.log.verbose(f"Bound backend: {name} -> pywebview.api.{safe_name}")
+                
+        return api
+
+    def inject_plugins(self, window: webview.Window):
         if not self.plugins:
             self.log.verbose("No plugins to inject.")
             return
@@ -389,7 +328,7 @@ class PluginManager:
         self.log.info(f"Starting injection for {len(self.plugins)} plugins...")
         for name, plugin in self.plugins.items():
             try:
-                plugin.apply()
+                plugin.apply(window)
             except Exception as e:
                 self.log.error(f"Failed to inject plugin '{name}': {e}")
         self.log.success("All plugins processed.")
