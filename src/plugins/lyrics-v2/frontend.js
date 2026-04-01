@@ -176,7 +176,7 @@
 
             try {
                 // Fetch using Pywebview API tree
-                await window.pywebview.api.Synced_Lyrics.start_fetch_lyrics(
+                await webui.call("Synced_Lyrics.start_fetch_lyrics",
                     title, artist, album, 
                     this.dom.video?.duration || 0, 
                     this.state.videoId,
@@ -203,7 +203,7 @@
 
                 try {
                     // Check Result using Pywebview API tree
-                    const result = await window.pywebview.api.Synced_Lyrics.check_lyrics_result(videoId);
+                    const result = await webui.call("Synced_Lyrics.check_lyrics_result", videoId);
 
                     if (result?.status === "pending") {
                         setTimeout(check, pollInterval);
@@ -349,7 +349,7 @@
                 
                 try {
                     // Refetch call Using Pywebview API tree
-                    await window.pywebview.api.Synced_Lyrics.start_fetch_lyrics(
+                    await webui.call("Synced_Lyrics.start_fetch_lyrics",
                         title, artist, album, 
                         this.dom.video?.duration || 0, 
                         this.state.videoId, 
@@ -382,7 +382,7 @@
                 
                 try {
                     // Save call Using Pywebview API tree
-                    const res = await window.pywebview.api.Synced_Lyrics.save_edited_lyrics(this.state.videoId, rawText);
+                    const res = await webui.call("Synced_Lyrics.save_edited_lyrics", this.state.videoId, rawText);
                     if (res && !res.error) {
                         this.state.lyrics = res;
                     } else {

@@ -1,3 +1,11 @@
 ytmusic-guide-entry-renderer:nth-child(4) {
     display: none !important;
 }
+
+ytmusic-player-ad-renderer, .ad-showing, .ad-interrupting, 
+.ytp-ad-overlay-container, .ytp-ad-module, 
+#player-ads, ytm-promoted-sparkles-web-renderer , ytmusic-mealbar-promo-renderer { display: none !important; }
+
+/* Prevent ad titles from flickering in the bottom bar */
+.ad-showing .title.ytmusic-player-bar,
+.ad-interrupting .title.ytmusic-player-bar { visibility: hidden !important; }

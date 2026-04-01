@@ -1,4 +1,4 @@
 {
     "name": "ytmd",
-    "files": ["purify.js", "color.css", "layout.css", "live_mesh.js", "compact_sidebar.js", "playback_pause_bypass.js"]
+    "files": ["color.css", "layout.css", "live_mesh.js", "compact_sidebar.js", "playback_pause_bypass.js"]
 }

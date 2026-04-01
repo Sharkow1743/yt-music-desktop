@@ -8,8 +8,6 @@ import threading
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
 
-import webview
-
 LYRIC_TYPE_PLAIN = 0
 LYRIC_TYPE_SYNCED = 1
 LYRIC_TYPE_WORD_SYNCED = 2

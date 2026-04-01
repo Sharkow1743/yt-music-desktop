@@ -6,7 +6,7 @@ import sys
 import types
 from typing import Any, Optional
 import typing
-import webview
+from shellac import Window
 from pydantic import BaseModel, TypeAdapter, model_validator
 import sqlite3
 
@@ -83,7 +83,8 @@ class PluginStorage:
         self.conn.commit()
 
 class Plugin:
-    def __init__(self, folder: str, manifest_file: str = 'manifest.json'):
+    def __init__(self, window: Window, folder: str, manifest_file: str = 'manifest.json'):
+        self.window = window
         self.folder = folder
         self.manifest_file = manifest_file
         self.manifest: ManifestModel = ManifestModel()
@@ -157,12 +158,13 @@ class Plugin:
                 self.storage = PluginStorage(storage_path)
                 logger_instance = get_logger(f'plugin.{self.manifest.name.replace(" ", "_")}')
 
-                # Note: 'window' is omitted here because it hasn't been created yet. 
-                # It will be dynamically assigned onto the instance via .apply()
                 available_dependencies = {
                     'config': config_dict,
                     'logger': logger_instance,
-                    'storage': self.storage
+                    'storage': self.storage,
+                    'c': config_dict,
+                    'l': logger_instance,
+                    's': self.storage
                 }
 
                 sig = inspect.signature(module.Main)
@@ -206,13 +208,10 @@ class Plugin:
             self.log.error(f"Error reading file {filename}: {e}")
         return ""
 
-    def apply(self, window: webview.Window):
+    def apply(self):
         self.log.info(f"Injecting {self.manifest.name}...")
 
         if self.python_instance:
-            self.python_instance.window = window
-            self.log.verbose('Found python instance. Window injected.')
-
             if hasattr(self.python_instance, 'on_ready') and callable(self.python_instance.on_ready):
                 try:
                     self.log.verbose(f"Calling on_ready for {self.manifest.name}")
@@ -228,13 +227,12 @@ class Plugin:
             with open(bootstrap_path, 'r', encoding='utf-8') as f:
                 bootstrap_js = f.read()
             
-            # Pass data to Javascript via window object before executing bootstrap
             setup_vars_js = f"""
                 window._currentPluginInitName = {json.dumps(self.manifest.name)};
                 window._currentPluginInitConfig = {json.dumps(config_data)};
             """
-            window.run_js(setup_vars_js)
-            window.run_js(bootstrap_js)
+            self.window.run_js(setup_vars_js)
+            self.window.run_js(bootstrap_js)
         else:
             self.log.error(f"'bootstrap.js' not found at {bootstrap_path}")
 
@@ -246,7 +244,7 @@ class Plugin:
             
             if file.endswith('.css'):
                 safe_css = json.dumps(content)
-                window.run_js(f"""
+                self.window.run_js(f"""
                     (function() {{
                         const styleTag = document.createElement('style');
                         styleTag.id = 'plugin-style-{self.manifest.name}';
@@ -257,7 +255,7 @@ class Plugin:
                 
             elif file.endswith('.js'):
                 safe_js = content
-                window.run_js(f"""
+                self.window.run_js(f"""
                     try {{
                         {safe_js}
                     }} catch (e) {{
@@ -268,7 +266,8 @@ class Plugin:
         self.log.success(f"Injection complete for {self.manifest.name}")
 
 class PluginManager:
-    def __init__(self):
+    def __init__(self, window: Window):
+        self.window = window
         self.plugin_base = os.path.join(get_base_path(), 'plugins')
         
         if not os.path.exists(self.plugin_base):
@@ -278,7 +277,7 @@ class PluginManager:
         self.plugins: dict[str, Plugin] = {}
         self.log = get_logger("manager")
 
-    def load_plugins(self):
+    def load(self):
         self.plugins = {}
         self.log.info(f"Scanning: {self.plugin_base}")
         
@@ -297,7 +296,7 @@ class PluginManager:
             if not os.path.isdir(item_path):
                 continue
 
-            plugin = Plugin(item_path)
+            plugin = Plugin(self.window, item_path)
             if plugin.is_valid:
                 self.plugins[plugin.manifest.name] = plugin
             else:
@@ -305,22 +304,13 @@ class PluginManager:
         
         self.log.success(f"Total plugins loaded: {len(self.plugins)}")
 
-    def get_combined_api(self):
-        self.log.verbose("Synthesizing combined API for pywebview...")
-        class CombinedAPI:
-            pass
-
-        api = CombinedAPI()
-        
+    def bind(self):
         for name, plugin in self.plugins.items():
             if plugin.python_instance:
                 safe_name = name.replace(" ", "_")
-                setattr(api, safe_name, plugin.python_instance)
-                self.log.verbose(f"Bound backend: {name} -> pywebview.api.{safe_name}")
-                
-        return api
+                self.window.bind(safe_name, plugin.python_instance)
 
-    def inject_plugins(self, window: webview.Window):
+    def inject(self):
         if not self.plugins:
             self.log.verbose("No plugins to inject.")
             return
@@ -328,7 +318,7 @@ class PluginManager:
         self.log.info(f"Starting injection for {len(self.plugins)} plugins...")
         for name, plugin in self.plugins.items():
             try:
-                plugin.apply(window)
+                plugin.apply()
             except Exception as e:
                 self.log.error(f"Failed to inject plugin '{name}': {e}")
         self.log.success("All plugins processed.")
