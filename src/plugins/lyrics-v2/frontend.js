@@ -116,11 +116,33 @@
 
             observer.observe(document.body, { childList: true, subtree: true });
         }
+
+        _isAdPlaying() {
+            const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            const adShowing = player?.classList.contains('ad-showing') || 
+                            player?.classList.contains('ad-interrupting') ||
+                            document.querySelector('.ad-showing, .ad-interrupting') !== null;
+            
+            // Also check if the metadata title is "Advertisement"
+            const isAdTitle = navigator.mediaSession?.metadata?.title === 'Advertisement';
+
+            return adShowing || isAdTitle;
+        }
         
         /**
          * Handles the logic for a new song.
          */
         _handleTrackChange(videoId) {
+
+            if (this._isAdPlaying()) {
+                this._log("Ad detected on track change. Skipping fetch.");
+                this.state.videoId = videoId;
+                this.state.isFetching = false;
+                this.state.lyrics = null;
+                this.render();
+                return; 
+            }
+            
             const oldTitle = navigator.mediaSession?.metadata?.title;
             this._log(`Handling track change: ${oldTitle || 'Unknown'} -> (waiting for metadata)`);
             
@@ -133,6 +155,13 @@
 
             let attempts = 0;
             const checkMetadata = setInterval(() => {
+                if (this._isAdPlaying()) {
+                    this._log("Ad detected during metadata wait. Aborting.");
+                    clearInterval(checkMetadata);
+                    this.state.isFetching = false;
+                    this.render();
+                    return;
+                }
                 const currentTitle = navigator.mediaSession?.metadata?.title;
                 const currentArtist = navigator.mediaSession?.metadata?.artist;
                 attempts++;
@@ -497,7 +526,7 @@
         }
 
         _syncLoop() {
-            if (this.state.isEditing || this.state.isFetching || this.state.lyrics?.type === 0 || !this.state.lyrics) {
+            if (this.state.isEditing || this.state.isFetching || this.state.lyrics?.type === 0 || !this.state.lyrics || this._isAdPlaying()) {
                 requestAnimationFrame(this._syncLoop);
                 return;
             }
