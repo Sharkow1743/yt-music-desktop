@@ -44,6 +44,8 @@ ytmd_logger = logging.getLogger("ytmd")
 ytmd_logger.setLevel("SPAM")
 ytmd_logger.propagate = True 
 
+ytmd_logger = logging.getLogger("shellac")
+ytmd_logger.setLevel("SPAM")
+
 def get_logger(name: str) -> verboselogs.VerboseLogger:
-    # This now returns a VerboseLogger because of setLoggerClass
     return logging.getLogger(f"ytmd.{name}")

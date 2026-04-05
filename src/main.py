@@ -1,6 +1,7 @@
 import os
 from os import path
 from pathlib import Path
+from time import sleep
 from logger import get_logger
 from shellac import Window
 from plugin import PluginManager, get_base_path
@@ -27,22 +28,27 @@ def main():
     manager = PluginManager(win)
     manager.load()
     manager.bind()
+    
+    @win.on('load', 'html')
+    @win.on('navigate', 'html')
+    def load(e):
+        logger.info('Loading by event')
+        win.run_js(TRUSTED_TYPES_BYPASS)
+        
+        purify_path = os.path.join(str(Path(__file__).parent.resolve()), 'purify.js')
+        if os.path.exists(purify_path):
+            with open(purify_path, 'r', encoding='utf-8') as f:
+                win.run_js(f.read())
+                
+        manager.inject()
 
-    # Show the initial page
     win.show('https://music.youtube.com/')
     
-    # Post-load initialization
     logger.success("Window initialized")
-    win.run_js(TRUSTED_TYPES_BYPASS)
     
-    # Load Purify.js
-    purify_path = os.path.join(str(Path(__file__).parent.resolve()), 'purify.js')
-    if os.path.exists(purify_path):
-        with open(purify_path, 'r', encoding='utf-8') as f:
-            win.run_js(f.read())
+    sleep(3)
+    load('asd')
 
-    # Inject plugins
-    manager.inject()
     
     win.wait()
 

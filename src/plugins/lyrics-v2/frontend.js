@@ -27,7 +27,8 @@
                 provider: this.config.default_provider,
                 activeIdx: -1,
                 isFetching: false,
-                isEditing: false // Track edit mode
+                isEditing: false,
+                lastTitle: null
             };
 
             this.dom = {
@@ -42,6 +43,7 @@
             this._syncLoop = this._syncLoop.bind(this);
             this._handleTrackChange = this._handleTrackChange.bind(this);
             this._toggleEditMode = this._toggleEditMode.bind(this);
+
             
             this._log("Plugin instance created.");
         }
@@ -133,48 +135,54 @@
          * Handles the logic for a new song.
          */
         _handleTrackChange(videoId) {
+            this._log(`Handling track change: ${videoId}`);
 
+            // If an ad is playing, don't give up – wait for it to end
             if (this._isAdPlaying()) {
-                this._log("Ad detected on track change. Skipping fetch.");
+                this._log("Ad detected during track change – will retry after ad ends.");
                 this.state.videoId = videoId;
-                this.state.isFetching = false;
                 this.state.lyrics = null;
-                this.render();
-                return; 
+                this.state.isFetching = false;  // Don't show "fetching" yet
+                this.render();  // Shows "Lyrics not found" temporarily
+
+                // Wait for ad to end, then fetch
+                const checkInterval = setInterval(() => {
+                    if (!this._isAdPlaying()) {
+                        clearInterval(checkInterval);
+                        this._log("Ad ended, now fetching lyrics for", videoId);
+                        this.fetchData();
+                    }
+                }, 500);
+                return;
             }
-            
-            const oldTitle = navigator.mediaSession?.metadata?.title;
-            this._log(`Handling track change: ${oldTitle || 'Unknown'} -> (waiting for metadata)`);
-            
+
+            // Original logic (no ad)
             this.state.videoId = videoId;
             this.state.activeIdx = -1;
             this.state.lyrics = null;
-            this.state.isEditing = false; // Reset edit mode on track change
-            this.state.isFetching = true; // Show fetching state immediately while waiting for metadata
-            this.render(); 
+            this.state.isEditing = false;
+            this.state.isFetching = true;
+            this.render();
 
             let attempts = 0;
             const checkMetadata = setInterval(() => {
                 if (this._isAdPlaying()) {
-                    this._log("Ad detected during metadata wait. Aborting.");
+                    this._log("Ad appeared during metadata wait – aborting and will retry later.");
                     clearInterval(checkMetadata);
-                    this.state.isFetching = false;
-                    this.render();
+                    // Re-run the same handler to trigger the ad-wait logic above
+                    this._handleTrackChange(videoId);
                     return;
                 }
                 const currentTitle = navigator.mediaSession?.metadata?.title;
                 const currentArtist = navigator.mediaSession?.metadata?.artist;
                 attempts++;
 
-                if ((currentTitle && currentTitle !== oldTitle) || attempts > 15) {
+                if ((currentTitle && currentTitle !== this.state.lastTitle) || attempts > 15) {
                     clearInterval(checkMetadata);
-                    
+                    this.state.lastTitle = currentTitle;
                     if (currentTitle && currentArtist) {
-                        this._log(`Metadata stabilized after ${attempts} attempts: "${currentTitle}" by ${currentArtist}`);
                         this.fetchData();
                     } else {
-                        // If metadata resolution completely fails, exit fetch state safely
-                        this._log("Failed to fetch metadata", "", "warn");
                         this.state.isFetching = false;
                         this.render();
                     }
@@ -183,11 +191,10 @@
         }
 
         /**
-         * Main data fetching orchestration.
+         * Shared fetch logic using the new async backend function.
+         * @param {string|null} forceProvider - Provider name or null for auto.
          */
-        async fetchData() {
-            if (!this.state.videoId) return;
-
+        async _fetchLyrics(forceProvider) {
             const title = navigator.mediaSession?.metadata?.title;
             const artist = navigator.mediaSession?.metadata?.artist;
             const album = navigator.mediaSession?.metadata?.album || "";
@@ -199,64 +206,38 @@
                 return;
             }
 
-            this.state.lyrics = null;
             this.state.isFetching = true;
-            this.render(); 
+            this.state.lyrics = null;
+            this.render();
 
             try {
-                // Fetch using Pywebview API tree
-                await webui.call("Synced_Lyrics.start_fetch_lyrics",
-                    title, artist, album, 
-                    this.dom.video?.duration || 0, 
+                const result = await webui.call("Synced_Lyrics.fetch_lyrics",
+                    title, artist, album,
+                    this.dom.video?.duration || 0,
                     this.state.videoId,
-                    null
+                    forceProvider || 'Auto'
                 );
 
-                this._pollLyricsResult(this.state.videoId, title);
-
+                if (result && !result.error) {
+                    const typeStr = result.type === 0 ? 'Plain' : (result.type === 2 ? 'Rich/Word' : 'Line-synced');
+                    this._log(`Successfully fetched ${typeStr} lyrics from ${result.provider || 'Backend'}`);
+                    this.state.lyrics = result;
+                } else {
+                    this._log(`Backend returned no lyrics or error`, result?.error, 'warn');
+                    this.state.lyrics = null;
+                }
             } catch (e) {
-                this._log("Fetch invocation error:", e, 'error');
+                this._log("Fetch error:", e, 'error');
+                this.state.lyrics = null;
+            } finally {
                 this.state.isFetching = false;
                 this.render();
             }
         }
 
-        /**
-         * Polls the backend for the lyrics result.
-         */
-        async _pollLyricsResult(videoId, title) {
-            const pollInterval = 500; // Check every 500ms
-
-            const check = async () => {
-                if (this.state.videoId !== videoId) return;
-
-                try {
-                    // Check Result using Pywebview API tree
-                    const result = await webui.call("Synced_Lyrics.check_lyrics_result", videoId);
-
-                    if (result?.status === "pending") {
-                        setTimeout(check, pollInterval);
-                        return;
-                    }
-
-                    if (result && !result.error) {
-                        const typeStr = result.type === 0 ? 'Plain' : (result.type === 2 ? 'Rich/Word' : 'Line-synced');
-                        this._log(`Successfully fetched ${typeStr} lyrics from ${result.provider || 'Backend'}`);
-                        this.state.lyrics = result;
-                    } else {
-                        this._log(`Backend returned no lyrics or error for ${title}`, result?.error, 'warn');
-                        this.state.lyrics = null;
-                    }
-                } catch (e) {
-                    this._log("Critical error during fetch polling:", e, 'error');
-                    this.state.lyrics = null;
-                } finally {
-                    this.state.isFetching = false;
-                    this.render();
-                }
-            };
-
-            setTimeout(check, pollInterval);
+        async fetchData() {
+            if (!this.state.videoId) return;
+            await this._fetchLyrics('Auto');
         }
         
         /**
@@ -365,31 +346,9 @@
             });
 
             document.getElementById('sl-refetch-btn').onclick = async () => {
-                if (this.state.isEditing) return; 
-                
+                if (this.state.isEditing) return;
                 const provider = document.getElementById('sl-provider-select').value;
-                this.state.isFetching = true;
-                this.state.lyrics = null;
-                this.render();
-                
-                const title = navigator.mediaSession?.metadata?.title;
-                const artist = navigator.mediaSession?.metadata?.artist;
-                const album = navigator.mediaSession?.metadata?.album || "";
-                
-                try {
-                    // Refetch call Using Pywebview API tree
-                    await webui.call("Synced_Lyrics.start_fetch_lyrics",
-                        title, artist, album, 
-                        this.dom.video?.duration || 0, 
-                        this.state.videoId, 
-                        provider || null
-                    );
-                    this._pollLyricsResult(this.state.videoId, title);
-                } catch (e) {
-                    this._log("Refetch error", e, "error");
-                    this.state.isFetching = false;
-                    this.render();
-                }
+                await this._fetchLyrics(provider || 'NoCache');
             };
             
             document.getElementById('sl-edit-btn').onclick = this._toggleEditMode;
@@ -458,12 +417,12 @@
 
             if (this.state.isFetching) {
                 this.dom.content.dataset.hash = ''; 
-                this.dom.content.innerHTML = '<div class="sl-msg">Fetching Lyrics...</div>';
+                this.dom.content.innerHTML = '<div class="sl-msg caution-stripe-animation active"><span>Fetching Lyrics...</span></div>';
             } else if (this.state.lyrics) {
                 this._renderLyrics();
             } else {
                 this.dom.content.dataset.hash = ''; 
-                this.dom.content.innerHTML = '<div class="sl-msg">Lyrics not found :(</div>';
+                this.dom.content.innerHTML = '<div class="sl-msg">Lyrics not found</div>';
             }
         }
         
@@ -489,6 +448,11 @@
                 const row = document.createElement('div');
                 row.className = 'sl-line';
                 row.dataset.idx = idx;
+                if (line.instrumental) {
+                    row.classList.add('caution-stripe-animation');
+                    row.appendChild(lineContent);
+                    return
+                }
                 
                 if (this.config.show_time_codes) {
                     row.innerHTML += `<span class="sl-ts">[${(line.time / 1000).toFixed(2)}]</span>`;
@@ -557,6 +521,22 @@
                 });
             }
 
+            if (this.state.activeIdx !== -1 && !this._wordDataLogged) {
+                const activeRow = this.dom.content.children[this.state.activeIdx];
+                if (activeRow) {
+                    const words = activeRow.querySelectorAll('.sl-word');
+                    words.forEach((w, i) => {
+                        console.log(`Word ${i}: start=${w.dataset.start}, duration=${w.dataset.duration}`);
+                    });
+                }
+                this._wordDataLogged = true;
+            }
+            // Reset flag when line changes
+            if (this.state.activeIdx !== this._lastLoggedIdx) {
+                this._wordDataLogged = false;
+                this._lastLoggedIdx = this.state.activeIdx;
+            }
+
             if (this.state.lyrics.type === 2 && this.state.activeIdx !== -1) {
                 const activeRow = this.dom.content.children[this.state.activeIdx];
                 if (activeRow) {
@@ -565,19 +545,12 @@
                         const start = parseInt(word.dataset.start);
                         const duration = parseInt(word.dataset.duration);
                         const end = start + duration;
-
-                        if (currentTimeMs >= end) {
-                            word.classList.add('passed');
-                            word.style.backgroundPosition = '0 0';
-                        } else if (currentTimeMs >= start) {
-                            const progress = ((currentTimeMs - start) / duration) * 100;
-                            const bgPos = 100 - progress; 
-                            word.style.backgroundPosition = `${bgPos}% 0`;
-                            word.classList.remove('passed');
-                        } else {
-                            word.classList.remove('passed');
-                            word.style.backgroundPosition = '100% 0';
-                        }
+                        let progress = 0;
+                        if (currentTimeMs >= end) progress = 1;
+                        else if (currentTimeMs >= start) progress = (currentTimeMs - start) / duration;
+                        else progress = 0;
+                        const percent = Math.min(100, Math.max(0, progress * 100));
+                        word.style.backgroundSize = `${percent}% 100%, 100% 100%`;
                     });
                 }
             }

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,13 +31,13 @@ class LyricsParser:
             return 0
         
     @staticmethod
-    def parse_richsync(text: str, logger=None) -> Tuple[List[Dict[str, Any]], str]:
+    def parse_richsync(text: str, logger=None) -> Tuple[List[Dict[str, Any]], int]: 
         """Parses the Musixmatch Richsync JSON format."""
         if logger: logger.debug("Attempting Richsync JSON parsing...")
         lines = []
         try:
             data = json.loads(text)
-            # The richsync format is typically a list of dicts with 'ts' and 'l' keys
+            # Richsync format: array of objects with 'ts', 'te', 'l' (words array)
             if not isinstance(data, list) or not all('ts' in d and 'l' in d for d in data):
                 if logger: logger.warning("JSON is not in expected Richsync format.")
                 return [], LYRIC_TYPE_PLAIN
@@ -46,34 +47,46 @@ class LyricsParser:
                 line_end = int(float(line_data.get('te', 0)) * 1000)
                 word_data = line_data.get('l', [])
                 
+                if not word_data:
+                    continue
+                    
                 parts = []
-                full_text_list = []
-
-                for word in word_data:
-                    # Each 'word' is a dict with 'c' (text) and 'o' (offset)
-                    offset_ms = int(float(word.get('o', 0)) * 1000)
-                    parts.append({
-                        "time": line_begin + offset_ms,
-                        "duration": 0, # Duration will be calculated later
-                        "text": word.get('c', '')
-                    })
-                    full_text_list.append(word.get('c', ''))
+                full_text = ""
                 
-                # Calculate duration for each part
+                # First pass: collect all words with their absolute times
+                for word in word_data:
+                    # Each word has 'c' (text) and 'o' (offset in seconds from line start)
+                    offset_ms = int(float(word.get('o', 0)) * 1000)
+                    word_time = line_begin + offset_ms
+                    word_text = word.get('c', '')
+                    # Preserve spaces - Musixmatch words don't include spaces, we add them
+                    parts.append({
+                        "time": word_time,
+                        "duration": 0,  # Will calculate
+                        "text": word_text
+                    })
+                    full_text += word_text + " "
+                
+                full_text = full_text.strip()
+                if not full_text:
+                    continue
+                
+                # Calculate durations for each part (time until next word starts)
                 for i in range(len(parts) - 1):
                     parts[i]["duration"] = parts[i+1]["time"] - parts[i]["time"]
-
-                full_text = "".join(full_text_list).strip()
-                if not full_text: continue
-
+                
+                # Last word duration = line end - last word time
+                if parts:
+                    parts[-1]["duration"] = max(100, line_end - parts[-1]["time"])
+                
                 lines.append({
                     "time": line_begin,
-                    "duration": max(0, line_end - line_begin),
+                    "duration": max(100, line_end - line_begin),
                     "text": full_text,
-                    "parts": parts if parts else None
+                    "parts": parts  # Send full parts array for word-by-word sync
                 })
             
-            if logger: logger.debug(f"Richsync parsing successful. Found {len(lines)} lines.")
+            if logger: logger.debug(f"Richsync parsing successful. Found {len(lines)} lines with word-level sync.")
             return lines, LYRIC_TYPE_WORD_SYNCED
 
         except (json.JSONDecodeError, ValueError, TypeError) as e:
@@ -168,12 +181,14 @@ class LyricsParser:
         if logger: logger.debug("Attempting LRC parsing...")
         lines = []
         is_word_level = False
+        # Support both . and : as milliseconds separators
         line_regex = re.compile(r'\[(\d+:\d+[.:]\d+)\](.*)')
         word_ts_regex = re.compile(r'<(\d+:\d+[.:]\d+)>')
         
         for raw_line in text.split('\n'):
             match = line_regex.match(raw_line.strip())
-            if not match: continue
+            if not match:
+                continue
             
             line_time = LyricsParser._time_to_ms(match.group(1))
             content = match.group(2).strip()
@@ -183,24 +198,104 @@ class LyricsParser:
             
             if word_matches:
                 is_word_level = True
+                # Split by timestamp tags
                 texts = word_ts_regex.split(content)
+                # texts format: ['', 'timestamp1', 'word1 ', 'timestamp2', 'word2 ', ...]
+                full_text = ""
                 for i in range(1, len(texts), 2):
-                    p_time = LyricsParser._time_to_ms(texts[i])
-                    p_text = texts[i+1] if i+1 < len(texts) else ""
-                    parts.append({"time": p_time, "text": p_text, "duration": 0})
+                    if i+1 < len(texts):
+                        p_time = LyricsParser._time_to_ms(texts[i])
+                        p_text = texts[i+1]
+                        parts.append({
+                            "time": p_time, 
+                            "text": p_text, 
+                            "duration": 0
+                        })
+                        full_text += p_text
                 
+                # Calculate durations
                 for i in range(len(parts) - 1):
                     parts[i]["duration"] = parts[i+1]["time"] - parts[i]["time"]
+                if parts:
+                    # Default duration for last word: 500ms
+                    parts[-1]["duration"] = 500
+            
+            # Clean text without timestamp tags
+            clean_text = word_ts_regex.sub('', content).strip()
             
             lines.append({
                 "time": line_time,
-                "text": word_ts_regex.sub('', content).strip(),
+                "text": clean_text,
                 "parts": parts if parts else None,
-                "duration": 0
+                "duration": 0  # Will calculate in post-processing
             })
-            
+        
         if logger: logger.debug(f"LRC parsing successful. WordSync={is_word_level}, Lines={len(lines)}")
         return lines, (LYRIC_TYPE_WORD_SYNCED if is_word_level else LYRIC_TYPE_SYNCED)
+    
+    @staticmethod
+    def insert_instrumental_lines(lines: List[Dict], gap_threshold_ms: int = 3000) -> List[Dict]:
+        """
+        Insert instrumental placeholder lines where gaps between lines exceed threshold.
+        Also replaces empty text lines with instrumental when they represent actual gaps.
+        """
+        if not lines:
+            return lines
+        
+        # First, find next non-empty line index for each position
+        next_non_empty = [None] * len(lines)
+        next_idx = None
+        for i in range(len(lines) - 1, -1, -1):
+            next_non_empty[i] = next_idx
+            if lines[i].get('text', '').strip():
+                next_idx = i
+        
+        result = []
+        for i, line in enumerate(lines):
+            has_text = bool(line.get('text', '').strip())
+            
+            # Determine if this line should be instrumental
+            if not has_text:
+                # Check if this empty line represents an instrumental gap
+                next_non_empty_idx = next_non_empty[i]
+                if next_non_empty_idx is not None:
+                    # Calculate gap from this line's start to next non-empty line's start
+                    gap = lines[next_non_empty_idx]['time'] - line['time']
+                    if gap > gap_threshold_ms:
+                        # This empty line is part of an instrumental section
+                        line['text'] = None
+                        line['instrumental'] = True
+                    else:
+                        # Gap too small, don't mark as instrumental
+                        line['instrumental'] = False
+                else:
+                    # No following non-empty lines, treat as instrumental only if it's long enough
+                    # For the last line, we don't have an end time, so default to False
+                    line['instrumental'] = False
+            else:
+                line['instrumental'] = False
+            
+            result.append(line)
+            
+            # Check gap from current line to next non-empty line
+            next_non_empty_idx = next_non_empty[i]
+            if next_non_empty_idx is not None and next_non_empty_idx > i:
+                next_line = lines[next_non_empty_idx]
+                current_end = line['time'] + line.get('duration', 0)
+                gap = next_line['time'] - current_end
+                
+                if gap > gap_threshold_ms:
+                    # Insert instrumental line for the gap
+                    instrumental = {
+                        'time': current_end,
+                        'duration': gap,
+                        'text': None,
+                        'parts': None,
+                        'instrumental': True
+                    }
+                    result.append(instrumental)
+        
+        return result
 
     @classmethod
     def parse(cls, text: str, logger=None):
@@ -242,23 +337,35 @@ class LyricsParser:
             if logger: logger.warning("Parser matched a format but failed to extract lines. Returning Plain.")
             return LYRIC_TYPE_PLAIN, text
 
-        # 4. Post-Process
+        # 4. Post-Process - Sort by time and calculate durations
         if logger: logger.debug(f"Post-processing {len(lines)} lines (Sorting & Duration calc).")
         lines.sort(key=lambda x: x["time"])
+        
         for i in range(len(lines)):
-            # Calculate line duration
-            if lines[i]["duration"] <= 0:
+            # Calculate line duration if not set
+            if lines[i].get("duration", 0) <= 0:
                 if i < len(lines) - 1:
                     lines[i]["duration"] = lines[i+1]["time"] - lines[i]["time"]
                 else:
-                    lines[i]["duration"] = 5000  # Default duration for the last line
-
-            # Calculate final word duration in a line
-            if lines[i]["parts"]:
-                last_p = lines[i]["parts"][-1]
-                if last_p["duration"] <= 0:
-                    line_end = lines[i]["time"] + lines[i]["duration"]
-                    last_p["duration"] = max(0, line_end - last_p["time"])
+                    lines[i]["duration"] = 5000  # 5 seconds default for last line
+            
+            # For word-synced lyrics, ensure word durations are correct
+            if lines[i].get("parts") and sync_type == LYRIC_TYPE_WORD_SYNCED:
+                parts = lines[i]["parts"]
+                if parts:
+                    # Calculate durations between words
+                    for j in range(len(parts) - 1):
+                        if parts[j].get("duration", 0) <= 0:
+                            parts[j]["duration"] = parts[j+1]["time"] - parts[j]["time"]
+                    
+                    # Last word duration
+                    last_word = parts[-1]
+                    if last_word.get("duration", 0) <= 0:
+                        line_end = lines[i]["time"] + lines[i]["duration"]
+                        last_word["duration"] = max(50, line_end - last_word["time"])
+                        
+        if lines and sync_type in (LYRIC_TYPE_SYNCED, LYRIC_TYPE_WORD_SYNCED):
+            lines = cls.insert_instrumental_lines(lines, gap_threshold_ms=3000)
 
         return sync_type, lines
 
@@ -368,7 +475,8 @@ class MusixMatchProvider(BaseLyricsProvider):
     def _fetch_lyrics(self, title: str, artist: str, duration: int) -> Optional[Dict[str, Any]]:
         if not self.token:
             self.token = self._get_token()
-            if not self.token: return None
+            if not self.token: 
+                return None
 
         params = {
             'app_id': self.app_id, 
@@ -378,49 +486,69 @@ class MusixMatchProvider(BaseLyricsProvider):
             'q_duration': duration, 
             'subtitle_format': 'mxm',
             'format': 'json',
-            'optional_calls': 'track.richsync,track.subtitle.get,track.lyrics.get'
+            'optional_calls': 'track.richsync,track.subtitles.get,track.lyrics.get'
         }
 
         try:
             r = self.session.get(f"{self.base_url}macro.subtitles.get", params=params, timeout=7)
-            if r.status_code != 200: return None
+            if r.status_code != 200:
+                self.log.warning(f"[MXM] HTTP {r.status_code}")
+                return None
             
-            # Use safe navigation to get the body
             json_payload = r.json()
             message = json_payload.get('message', {})
-            body = message.get('body')
+            body = message.get('body', {})
             macro_calls = body.get('macro_calls', {})
 
-            # 1. Try Word-Synced (Richsync)
-            # Note: The key is often 'track.richsync.get'
+            # 1. Try Word-Synced (Richsync) - this is the priority
             rs_call = macro_calls.get('track.richsync.get', {})
-            if isinstance(rs_call, dict):
-                richsync = rs_call.get('message', {}).get('body', {}).get('richsync', {})
-                if isinstance(richsync, dict):
+            if rs_call and isinstance(rs_call, dict):
+                rs_message = rs_call.get('message', {})
+                rs_body = rs_message.get('body', {})
+                richsync = rs_body.get('richsync', {})
+                
+                if richsync and isinstance(richsync, dict):
                     body_text = richsync.get('richsync_body')
                     if body_text:
+                        self.log.debug("[MXM] Found Richsync data, parsing...")
                         sync_type, parsed = LyricsParser.parse(body_text, self.log)
-                        return {"type": sync_type, "lyrics": parsed}
+                        if parsed:
+                            self.log.info(f"[MXM] Richsync parsed: type={sync_type}, lines={len(parsed) if isinstance(parsed, list) else 'N/A'}")
+                            return {"type": sync_type, "lyrics": parsed}
 
             # 2. Try Line-Synced (Subtitles)
             sub_call = macro_calls.get('track.subtitles.get', {})
-            if isinstance(sub_call, dict):
-                subs = sub_call.get('message', {}).get('body', {})
-                if isinstance(subs, dict) and subs.get('subtitle_list'):
-                    body_text = subs['subtitle_list'][0]['subtitle']['subtitle_body']
-                    sync_type, parsed = LyricsParser.parse(body_text, self.log)
-                    return {"type": sync_type, "lyrics": parsed}
+            if sub_call and isinstance(sub_call, dict):
+                sub_message = sub_call.get('message', {})
+                sub_body = sub_message.get('body', {})
+                subs = sub_body.get('subtitle_list', [])
+                
+                if subs and len(subs) > 0:
+                    subtitle = subs[0].get('subtitle', {})
+                    body_text = subtitle.get('subtitle_body')
+                    if body_text:
+                        self.log.debug("[MXM] Found Subtitle data, parsing...")
+                        sync_type, parsed = LyricsParser.parse(body_text, self.log)
+                        return {"type": sync_type, "lyrics": parsed}
 
             # 3. Fallback to Plain Lyrics
             lyr_call = macro_calls.get('track.lyrics.get', {})
-            if isinstance(lyr_call, dict):
-                lyrics = lyr_call.get('message', {}).get('body', {}).get('lyrics', {})
-                if isinstance(lyrics, dict) and lyrics.get('lyrics_body'):
-                     return {"type": LYRIC_TYPE_PLAIN, "lyrics": lyrics['lyrics_body']}
+            if lyr_call and isinstance(lyr_call, dict):
+                lyr_message = lyr_call.get('message', {})
+                lyr_body = lyr_message.get('body', {})
+                lyrics = lyr_body.get('lyrics', {})
+                
+                if lyrics and isinstance(lyrics, dict):
+                    body_text = lyrics.get('lyrics_body')
+                    if body_text:
+                        self.log.debug("[MXM] Found plain lyrics")
+                        return {"type": LYRIC_TYPE_PLAIN, "lyrics": body_text}
+                    
         except AttributeError:
-            self.log.warning('[MXM] Api returned unexpected format. Likely it didn`t found lyrics')
+            self.log.warning(f"[MXM] Provider returned unexpected format. Likely it hasn`t found lyrics")
+                        
         except Exception as e:
-            self.log.error(f"[MXM] Fetch error: {e}")
+            self.log.error(f"[MXM] Fetch error: {e}", exc_info=True)
         
         return None
 
@@ -508,81 +636,71 @@ class Main:
             "Genius": GeniusProvider(logger),
             "MusixMatch": MusixMatchProvider(logger),
         }
-
-    def start_fetch_lyrics(self, title, artist, album, duration, video_id, force_provider=None):
-        self.log.info(f"Starting background fetch for: {title} {'(Provider: ' + force_provider + ')' if force_provider else ''}")
         
-        if len(self._async_results) > 10:
-            self._async_results.clear()
-            
-        thread = threading.Thread(
-            target=self._background_worker,
-            args=(title, artist, album, duration, video_id, force_provider),
-            daemon=True
-        )
-        thread.start()
-        return {"status": "started"}
-
-    def _background_worker(self, title, artist, album, duration, video_id, force_provider):
-        try:
-            result = self._fetch_sync(title, artist, album, duration, video_id, force_provider)
-        except Exception as e:
-            self.log.error(f"Fetch error: {e}")
-            result = {"type": -1, "error": str(e) or "Lyrics not found"}
-            
-        if not result:
-            result = {"type": -1, "error": "Lyrics not found"}
-            
-        self._async_results[video_id] = result
-
-    def save_edited_lyrics(self, video_id, raw_text):
-        self.log.info(f"Saving edited lyrics for {video_id}")
-        sync_type, parsed = LyricsParser.parse(raw_text, self.log)
+    async def fetch_lyrics(
+        self,
+        title: str,
+        artist: str,
+        album: str,
+        duration: int,
+        video_id: str,
+        provider: Optional[str] = 'Auto'
+    ) -> Dict[str, Any]:
+        self.log.info(f"Fetch for: {title} {'(Provider: ' + provider + ')' if provider else ''}")
         
-        result = {"type": sync_type, "lyrics": parsed, "provider": "User (Edited)"}
+        is_force_provider = provider not in ['Auto', 'NoCache'] and provider in self.providers
 
-        self.storage.set(video_id, result)
-        self._async_results[video_id] = result
-        return result
-        
-    def check_lyrics_result(self, video_id):
-        if video_id in self._async_results:
-            return self._async_results.pop(video_id) 
-        return {"status": "pending"}
 
-    def _fetch_sync(self, title, artist, album, duration, video_id, force_provider):
-        if not title or not artist: 
+        if not title or not artist:
             return {"type": -1, "error": "Missing metadata"}
 
         cache_key = video_id
-        if not force_provider:
-            cached_result = self.storage.get(cache_key)
-            if cached_result: 
-                return cached_result
 
-        meta = {"title": title, "artist": artist, "album": album, "duration": duration, "videoId": video_id}
-        
-        provider_names = [force_provider] if (force_provider and force_provider in self.providers) else list(self.providers.keys())
+
+        if provider == 'Auto':
+            cached = self.storage.get(cache_key)
+            if cached:
+                self.log.debug(f"Returning cached lyrics for {video_id}")
+                return cached
+
+        meta = {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "duration": duration,
+            "videoId": video_id
+        }
+
+
+        if is_force_provider:
+            provider_names = [provider]
+        else:
+            provider_names = list(self.providers.keys())
 
         best_result = None
+
+
         for name in provider_names:
             provider = self.providers.get(name)
-            if not provider: continue
-            
-            self.log.debug(f"Querying provider: {name}")
-            res = provider.search(meta)
-            
+            if not provider:
+                continue
+
+            self.log.debug(f"Async querying provider: {name}")
+
+            res = await asyncio.to_thread(provider.search, meta)
+
             if res:
-                if force_provider:
+                if is_force_provider:
                     best_result = res
                     break
                 if best_result is None or res['type'] > best_result['type']:
                     best_result = res
-                    if best_result['type'] == LYRIC_TYPE_WORD_SYNCED: 
-                        break 
+                    if best_result['type'] == LYRIC_TYPE_WORD_SYNCED:
+                        break
+
 
         if best_result:
             self.storage.set(cache_key, best_result)
             return best_result
-        
+
         return {"type": -1, "error": "Lyrics not found"}

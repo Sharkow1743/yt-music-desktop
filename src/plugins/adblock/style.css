@@ -1,11 +1,51 @@
-ytmusic-guide-entry-renderer:nth-child(4) {
+/* Hide all ad containers before they ever render */
+ytmusic-player-ad-renderer,
+.ad-showing,
+.ad-interrupting,
+.ytp-ad-module,
+.ytp-ad-player-overlay,
+.ytp-ad-overlay-container,
+.video-ads,
+#player-ads,
+ytm-promoted-sparkles-web-renderer,
+ytmusic-mealbar-promo-renderer,
+.ytp-ad-image-overlay,
+.ytp-ad-text-overlay,
+.ytp-ad-skip-button-container,
+.ytp-ad-progress,
+.html5-ads,
+.ytm-ad-module,
+ytd-ad-slot-renderer,
+ytd-in-feed-ad-layout-renderer,
+tp-yt-paper-dialog:has(#feedback),
+div[id*="ad-container"],
+div[class*="ad-badge"],
+#items ytmusic-guide-entry-renderer:nth-child(4) {
     display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    visibility: collapse !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
-ytmusic-player-ad-renderer, .ad-showing, .ad-interrupting, 
-.ytp-ad-overlay-container, .ytp-ad-module, 
-#player-ads, ytm-promoted-sparkles-web-renderer , ytmusic-mealbar-promo-renderer { display: none !important; }
-
-/* Prevent ad titles from flickering in the bottom bar */
+/* Prevent title flicker in YT Music player bar when ad would appear */
 .ad-showing .title.ytmusic-player-bar,
-.ad-interrupting .title.ytmusic-player-bar { visibility: hidden !important; }
+.ad-interrupting .title.ytmusic-player-bar,
+ytmusic-player-bar .title:has(+ .ad-showing) {
+    visibility: hidden !important;
+    opacity: 0 !important;
+    transition: none !important;
+}
+
+/* Remove any leftover spacing from hidden ads */
+body, ytmusic-app, #contents {
+    transition: none !important;
+}
+
+/* Ensure no layout shift during ad skip */
+video + .ytp-ad-module {
+    display: none !important;
+}

@@ -3,6 +3,7 @@
     --accent: #ff8c00;           /* Main Orange Accent */
     --accent-light: #ffc864;     /* Lighter Orange (for lyrics) */
     --bg: #502c00;               /* Surface & Backgrounds */
+    --text: #9f9f9f;
     --text-inverse: #2d2d2d;     /* Dark text on light backgrounds */
     --error: #ff4e4e;            /* Invalid/Error color */
     
